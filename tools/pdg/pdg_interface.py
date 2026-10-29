@@ -12,6 +12,8 @@ with alias resolution and structured data output.
 
 import pdg
 from dataclasses import dataclass, field, asdict
+import math
+import re
 from typing import Optional, List, Dict, Any, Union
 from .particle_aliases import resolve_alias, get_resolution_info
 
@@ -27,6 +29,12 @@ class PropertyValue:
     limit_type: Optional[str] = None  # "upper" or "lower"
     confidence_level: Optional[float] = None
     description: Optional[str] = None
+    # Where the number comes from: the PDG identifier of the quantity, the
+    # Review edition, the value as the Review prints it, and the pdgLive page.
+    pdgid: Optional[str] = None
+    edition: Optional[str] = None
+    display: Optional[str] = None
+    url: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary, omitting None values."""
@@ -35,6 +43,19 @@ class PropertyValue:
             if v is not None:
                 result[k] = v
         return result
+
+
+def _base_pdgid(obj) -> Optional[str]:
+    """``S044/2026`` -> ``S044``; None when the object has no identifier."""
+    try:
+        pid = getattr(obj, "pdgid", None)
+    except Exception:
+        return None
+    return str(pid).split("/")[0] if pid else None
+
+
+def pdglive_url(pdgid: str) -> str:
+    return "https://pdglive.lbl.gov/DataBlock.action?node=" + pdgid.split("/")[0]
 
 
 @dataclass
@@ -47,6 +68,7 @@ class BranchingFractionInfo:
     is_limit: bool = False
     limit_type: Optional[str] = None
     pdgid: Optional[str] = None
+    url: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary, omitting None values."""
@@ -214,6 +236,53 @@ class PDGInterface:
 
         return info
 
+    def _source(self, name: str, kind: str, value_std: Optional[float]) -> Dict[str, Any]:
+        """Identifier, edition, printed value and asymmetric errors (in the
+        returned unit) of the particle's first mass, width or lifetime entry."""
+        try:
+            pdg_name, _, _ = get_resolution_info(name)
+            particle = self.api.get_particle_by_name(pdg_name)
+            entries = list({"mass": particle.masses, "width": particle.widths, "lifetime": particle.lifetimes}[kind]())
+        except Exception:
+            return {}
+        if not entries:
+            return {}
+        q = entries[0]
+        out = {"pdgid": q.pdgid.split("/")[0], "edition": str(getattr(self.api, "edition", "")) or None,
+               "url": pdglive_url(q.pdgid)}
+        units = getattr(q, "units", None) or ""
+        text = getattr(q, "display_value_text", None)
+        if text:
+            # The Review prints some values scaled (tau mean life 290.3 in units
+            # of 1e-15 s); recover the power of ten from the stored value.
+            shown = re.match(r"[-+]?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?", text)
+            power = 0
+            try:
+                if shown and float(shown.group(0)) and q.value:
+                    power = round(math.log10(q.value / float(shown.group(0))))
+            except Exception:
+                power = 0
+            text = text.replace("+-", " ± ")
+            out["display"] = (f"({text}) × 10^{power} {units}" if power else f"{text} {units}").strip()
+        # The entry's errors are in its display units; scale them to ours.
+        try:
+            if value_std and q.value:
+                scale = value_std / q.value
+                if q.error_positive is not None:
+                    out["error_plus"] = q.error_positive * scale
+                if q.error_negative is not None:
+                    out["error_minus"] = q.error_negative * scale
+        except Exception:
+            pass
+        return out
+
+    def _with_source(self, name: str, kind: str, value: PropertyValue) -> PropertyValue:
+        for k, v in self._source(name, kind, value.value).items():
+            if k in ("error_plus", "error_minus") and getattr(value, k) is not None:
+                continue
+            setattr(value, k, v)
+        return value
+
     def get_mass(self, name: str) -> PropertyValue:
         """
         Get particle mass with errors.
@@ -225,7 +294,7 @@ class PDGInterface:
             PropertyValue with mass in GeV
         """
         particle = self.get_particle(name)
-        return PropertyValue(
+        return self._with_source(name, "mass", PropertyValue(
             value=particle.mass_gev,
             unit="GeV",
             error_plus=particle.mass_error_plus,
@@ -233,7 +302,7 @@ class PDGInterface:
             is_limit=particle.mass_is_limit,
             limit_type=particle.mass_limit_type,
             description=f"Mass of {particle.pdg_name}"
-        )
+        ))
 
     def get_width(self, name: str) -> PropertyValue:
         """
@@ -246,13 +315,13 @@ class PDGInterface:
             PropertyValue with width in GeV
         """
         particle = self.get_particle(name)
-        return PropertyValue(
+        return self._with_source(name, "width", PropertyValue(
             value=particle.width_gev,
             unit="GeV",
             error_plus=particle.width_error_plus,
             error_minus=particle.width_error_minus,
             description=f"Decay width of {particle.pdg_name}"
-        )
+        ))
 
     def get_lifetime(self, name: str) -> PropertyValue:
         """
@@ -265,13 +334,13 @@ class PDGInterface:
             PropertyValue with lifetime in seconds
         """
         particle = self.get_particle(name)
-        return PropertyValue(
+        return self._with_source(name, "lifetime", PropertyValue(
             value=particle.lifetime_s,
             unit="s",
             error_plus=particle.lifetime_error_plus,
             error_minus=particle.lifetime_error_minus,
             description=f"Lifetime of {particle.pdg_name}"
-        )
+        ))
 
     def get_branching_fractions(
         self, name: str, limit: int = 50, include_inclusive: bool = False
@@ -307,6 +376,8 @@ class PDGInterface:
                     fraction=bf.value if hasattr(bf, 'value') else None,
                     pdgid=bf.pdgid if hasattr(bf, 'pdgid') else None
                 )
+                if bf_info.pdgid:
+                    bf_info.url = pdglive_url(bf_info.pdgid)
 
                 # Check for errors
                 if hasattr(bf, 'error_positive') and bf.error_positive is not None:
@@ -338,6 +409,8 @@ class PDGInterface:
                         fraction=bf.value if hasattr(bf, 'value') else None,
                         pdgid=bf.pdgid if hasattr(bf, 'pdgid') else None
                     )
+                    if bf_info.pdgid:
+                        bf_info.url = pdglive_url(bf_info.pdgid)
                     results.append(bf_info)
             except Exception:
                 pass
@@ -374,7 +447,8 @@ class PDGInterface:
         if resolved_lower != query_lower:
             try:
                 p = self.api.get_particle_by_name(resolved)
-                entry = {"name": p.name, "mcid": p.mcid, "mass_gev": p.mass}
+                entry = {"name": p.name, "mcid": p.mcid, "mass_gev": p.mass,
+                         "pdgid": _base_pdgid(p)}
                 results.append(entry)
                 seen_names.add(p.name)
             except Exception:
@@ -395,6 +469,7 @@ class PDGInterface:
                                 "name": p.name,
                                 "mcid": p.mcid,
                                 "mass_gev": p.mass,
+                                "pdgid": _base_pdgid(p),
                             })
                             seen_names.add(p.name)
                     except Exception:
@@ -440,6 +515,8 @@ class PDGInterface:
 
             result = {
                 "pdgid": pdgid,
+                "edition": str(getattr(self.api, "edition", "")) or None,
+                "url": pdglive_url(pdgid),
                 "description": getattr(item, 'description', None),
                 "value": getattr(item, 'value', None),
                 "unit": getattr(item, 'units', None)

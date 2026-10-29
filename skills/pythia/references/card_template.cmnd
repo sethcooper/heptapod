@@ -1,0 +1,87 @@
+! ======================================================================
+! Annotated Pythia 8 run card for heptapod's PythiaFromRunCardTool.
+!
+! Syntax rules, taken from Settings::readString in the Pythia source:
+!   * A line is a COMMENT unless its first non-blank character is a letter
+!     (-> settings database) or a digit (-> particle data table). Both `!`
+!     and `#` therefore work, as does any other punctuation.
+!   * `=` is optional; Pythia replaces it with a space and reads the first
+!     two whitespace-separated tokens. `Beams:eCM 13600.` is equally valid.
+!   * Names are case-insensitive, and `::` is folded to `:`.
+!   * Only the first two tokens matter, which is why a trailing `! comment`
+!     is safe -- and why a value containing a space is silently truncated.
+!   * A boolean is TRUE only for true/1/on/yes/ok. Anything else, including
+!     a typo like `onn`, is FALSE with no warning.
+!
+! Validate with ValidatePythiaRunCardTool before generating.
+! ======================================================================
+
+
+! ---- 1. Beams --------------------------------------------------------
+! For an internally generated process. Omit this whole block when
+! showering LHE events; see section 1b instead.
+Beams:idA = 2212                  ! proton
+Beams:idB = 2212                  ! proton
+Beams:eCM = 13600.                ! CM energy in GeV (Run 3)
+
+! ---- 1b. LHE showering (alternative to section 1) --------------------
+! To shower events from an external matrix-element generator with
+! PythiaFromRunCardTool, pass lhe_path: the tool appends both lines below to
+! the card it runs, overriding anything here. Uncomment them only for a card
+! that must also read the LHE file outside the tool.
+!
+! Beams:frameType = 4
+! Beams:LHEF = events.lhe
+
+
+! ---- 2. Hard process -------------------------------------------------
+! Exactly one of these blocks. Search for others with
+! PythiaSettingsSearchTool(query="...", topic="process").
+!
+!   SoftQCD:nonDiffractive = on   ! minimum bias / underlying event
+!   SoftQCD:all = on              ! + elastic and diffractive
+!   HardQCD:all = on              ! dijets -- REQUIRES a pTHat cut, below
+!   Top:gg2ttbar = on             ! ttbar
+!   Top:qqbar2ttbar = on
+!   WeakSingleBoson:ffbar2gmZ = on   ! Drell-Yan
+!   HiggsSM:gg2H = on             ! gluon-fusion Higgs
+!
+! Omit this section entirely when Beams:frameType = 4 -- the process comes
+! from the LHE file, and switching one on as well double-counts.
+HardQCD:all = on
+
+
+! ---- 3. Phase-space cuts ---------------------------------------------
+! HardQCD without a pT cut diverges into soft junk: almost every event
+! lands at the lowest pT and the sample is useless. SoftQCD processes take
+! no such cut (they are the divergence, regularised internally).
+PhaseSpace:pTHatMin = 20.         ! GeV
+
+
+! ---- 4. Particle properties (NOT settings) ---------------------------
+! Lines starting with a digit go to the particle data table. These are not
+! in the settings database and PythiaSettingsSearchTool will not find them.
+! 6:m0 = 172.5                    ! top mass in GeV
+! 15:mayDecay = off               ! keep taus stable for the analysis
+! 23:onMode = off                 ! disable all Z decay channels ...
+! 23:onIfAny = 13 -13             ! ... then re-enable Z -> mu mu
+
+
+! ---- 5. Physics switches ---------------------------------------------
+! All default to on. Turn one off only deliberately -- and remember that a
+! typo in the value reads as `off` without complaint.
+! PartonLevel:MPI = off           ! no underlying event
+! PartonLevel:ISR = off           ! no initial-state radiation
+! PartonLevel:FSR = off           ! no final-state radiation
+! HadronLevel:all = off           ! parton level only, no hadrons
+! HadronLevel:Decay = off         ! hadrons formed but not decayed
+
+
+! ---- 6. Run control --------------------------------------------------
+! Main:numberOfEvents is IGNORED by PythiaFromRunCardTool, which loops over
+! its own n_events runtime field. Keep it only for standalone main programs.
+!
+! The tool's `seed` field, when given, overrides Random:seed here; this
+! seed applies only to runs without one.
+! Random:setSeed = on             ! required, or Random:seed does nothing
+! Random:seed = 12345             ! 0 = time-based, -1 = default sequence

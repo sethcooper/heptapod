@@ -99,10 +99,14 @@ Tools are grouped into bundles so you can install only what a workflow needs.
 
 | Workflow | Bundles |
 |----------|---------|
-| Particle data, literature, unit conversions | `pdg`, `inspire`, `units` |
+| Particle data, literature, published data tables, unit conversions | `pdg`, `inspire`, `arxiv`, `literature`, `hepdata`, `units` |
 | Feynman diagrams and dimensional estimates | `nda` |
 | Symbolic amplitudes and UFO models | `eda`\*, `feynrules`\* |
 | Monte Carlo generation and event analysis | `mg5`\*, `event_gen`, `analysis`, `bsm` |
+| Pythia or Sherpa alone, event datasets, detector simulation, comparison with measurements | `pythia`, `sherpa`\*, `events`, `delphes`\*, `rivet`\* |
+| Your own Pythia 8 or Sherpa build, driven from C++ | `pythia_cpp`\*, `sherpa_cpp`\* |
+| Process catalogues: model inspection, 1→N decay census, independent MG5 graph checks | `processes`, `process_validation`\* |
+| Background jobs, provenance ledgers, independent model review | `jobs`, `logging`, `reverse`\* |
 
 \* Requires additional [configuration](#configuration).
 
@@ -118,7 +122,7 @@ See [toolkit.yaml](toolkit.yaml) for the complete bundle definitions and depende
 
 ## Configuration
 
-Most bundles work after installation. The `mg5`, `eda`, and `feynrules` bundles require external software; their tools remain inactive until the required paths are configured. Replace the example paths below with your local installations.
+Most bundles work after installation. The `mg5`, `eda`, `feynrules`, `delphes`, `rivet`, `sherpa`, `pythia_cpp` and `sherpa_cpp` bundles require external software; their tools remain inactive until the required paths are configured. Replace the example paths below with your local installations.
 
 **MadGraph** (`mg5`):
 
@@ -138,6 +142,29 @@ tb config set heptapod wolframscript_path /path/to/wolframscript
 tb config set heptapod feynrules_path /path/to/FeynRules
 ```
 
+FeynRules 2.3.49 needs a Wolfram kernel older than 14: from 14 on, `Commutator` and `MatrixSymbol` are protected built-ins that FeynRules redefines, and the UFO export comes out malformed. With several kernels installed, point WolframScript at a 13.x one, for example `export WOLFRAMSCRIPT_KERNELPATH=/Applications/Mathematica.app/Contents/MacOS/WolframKernel`.
+
+**Delphes** (`delphes`), the directory holding the `DelphesHepMC3` executable:
+
+```bash
+tb config set heptapod delphes_path /path/to/Delphes
+```
+
+**Rivet** (`rivet`), the prefix holding `bin/rivet-config`:
+
+```bash
+tb config set heptapod rivet_path /path/to/rivet
+```
+
+**Your own Pythia 8 or Sherpa build** (`sherpa`, `pythia_cpp`, `sherpa_cpp`), the install prefixes holding `bin/pythia8-config` and `bin/Sherpa-config`; a C++ compiler must be on `PATH`. Note that Pythia is installed into the toolkit environment by default; Sherpa is not, although PyPI has a wheel for a few platforms (see the [Sherpa tools](tools/README.md#sherpafromruncardtool--sherpacppfromruncardtool)):
+
+```bash
+tb config set heptapod pythia_path /path/to/pythia8317
+tb config set heptapod sherpa_path /path/to/sherpa-3.0.2
+```
+
+**Independent model review** (`reverse`) spawns a CLI agent of your choice rather than an external binary; configure it with `blank_agent_cmd` as described in [`tools/reverse/README.md`](tools/reverse/README.md#configuring-the-agent).
+
 Inspect the effective configuration:
 
 ```bash
@@ -150,7 +177,7 @@ Validate required configuration fields:
 tb config validate heptapod
 ```
 
-See the [external dependency guide](docs/usage.md#external-dependencies) for installation details. Pythia and Sherpa are installed automatically with the `event_gen` bundle.
+See the [external dependency guide](docs/usage.md#external-dependencies) for installation details, including the platforms the Pythia and Sherpa wheels cover.
 
 ## Installation options and versions
 
@@ -185,9 +212,10 @@ See the [source installation guide](docs/usage.md#installing-from-source) for mo
 
 ## Examples and reference
 
-- **Examples:** [API setup and demo guide](examples/README.md), [symbolic calculations](examples/eda/), [diagram enumeration and NDA](examples/nda/), [leptoquark simulation](examples/sim/s1_lq_rr/).
+- **Examples:** [API setup and demo guide](examples/README.md), [symbolic calculations](examples/eda/), [diagram enumeration and NDA](examples/nda/), [leptoquark simulation](examples/sim/s1_lq_rr/), [Lagrangian extraction from a paper](examples/lagrangian_extraction/).
 - **Tools:** [tool reference](tools/README.md) and [advanced setup](docs/usage.md).
-- **Skills:** [agent guides](skills/) for FeynRules model building and MadGraph workflows, including common pitfalls and worked templates.
+- **Process catalogues:** [workflow and portable installation guide](docs/PROCESS_CATALOGUE.md) and [validation record](docs/PROCESS_CATALOGUE_TESTING.md).
+- **Skills:** [agent guides](skills/) for FeynRules model building, MadGraph workflows, Pythia run cards and main programs, Sherpa run cards, and Rivet comparisons with measurements, including common pitfalls and worked templates. The [skills guide](docs/usage.md#skills) explains how each harness surfaces them.
 
 ## Contributing
 

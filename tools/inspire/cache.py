@@ -127,6 +127,15 @@ class InspireCache:
 
         return entry["data"]
 
+    def get_entry(self, key: str) -> Optional[Dict[str, Any]]:
+        """Like :meth:`get`, but returns ``{"data", "timestamp"}`` so callers
+        can report when a cached response was originally fetched."""
+        data = self.get(key)
+        if data is None:
+            return None
+        entry = self._cache["entries"].get(self._hash_key(key))
+        return {"data": data, "timestamp": entry["timestamp"] if entry else None}
+
     def set(self, key: str, data: Dict[str, Any]):
         """
         Store value in cache.

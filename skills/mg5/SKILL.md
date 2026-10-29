@@ -51,8 +51,8 @@ event before going further.
 
 A placeholder such as `Width -> {Wphid, 1.0*^-9}` survives into the param card,
 and MG5's internal numerical floors near very small widths show up as a fake
-~0.4 MeV spread in reconstructed peaks. For real widths, run `compute_widths`
-**before** `generate`:
+~0.4 MeV spread in reconstructed peaks. For real propagator widths in the param
+card, run `compute_widths` **before** `generate`:
 
 ```
 import model UFO_dir
@@ -69,6 +69,42 @@ then fails with `No processes generated. Please generate a process first.`
 
 For a deliberate narrow-width approximation, set widths explicitly to something
 like 1e-15 GeV — but know the numerical limits you are working against.
+
+### 3. A partial width you report is an integration of that channel
+
+A partial width (or cross section) that you report or use as a check is a
+Monte Carlo integration of the channel's squared amplitude: `generate` the
+exact final state, `output`, `launch`, and read the width from the run (the
+LHE header or the log). Restrict coupling orders (`QED<=2`, `NP=1`, ...) only
+where the excluded diagrams are negligible, to save time without changing the
+answer.
+
+`compute_widths` (MadWidth) is an estimate, not this integration. Above two
+bodies it assembles each channel from chained two-body decays and keeps fewer
+diagrams than `generate`, so it can drop identical-particle exchange and
+gauge-cancelling diagrams: a three-body partial width can come out wrong by
+factors of several while its neighbours agree. It also zeroes partial widths of
+coloured parents below its QCD scale. Use it for the propagator widths in the
+param card (rule 2), not as the number you report.
+
+```
+import model UFO_dir
+generate n1 > ve z z        # the channel itself, every diagram
+output n1_vezz
+launch n1_vezz
+set nevents 5000            # the width is the run's integral; events are a by-product
+```
+
+## Many diagrams: restrict before you wait
+
+A large final state can have dozens of interfering diagrams, and MadEvent
+integrates roughly one channel per diagram. Organize the diagrams into coupling
+classes first, then use amplitude orders (`QED<=3`, model orders like `NP=4`),
+squared orders (`QED^2==8`, for single interference terms), diagram filters
+(`/ a`, `$$ a`, `$ z`) or a restriction card to integrate the pieces that matter
+quickly. Restricted runs are components: they do not sum to the coherent rate,
+and dropping a class needs evidence that it is below your precision. See
+`references/many_diagrams.md`.
 
 ## When MG5 fails, read the right log
 
@@ -93,8 +129,9 @@ That shows what MG5 hits *after* the auto-converter. Cross-reference
 1. **What is the target process, and what NP order does the cascade carry?**
    Count the BSM vertices on the target diagram — that count is your `NP=N`
    constraint.
-2. **Do widths matter here?** Plan for `compute_widths`, or accept the
-   narrow-width approximation deliberately.
+2. **Do widths matter here?** Plan for `compute_widths` for propagators, or
+   accept the narrow-width approximation deliberately. A partial width you
+   report comes from launching that channel (rule 3).
 
 If the model itself is in doubt — missing order tags, duplicate mass
 parameters — check the UFO first; see the `feynrules` skill.
@@ -102,8 +139,13 @@ parameters — check the UFO first; see the `feynrules` skill.
 ## Running
 
 ```bash
-# 1. Write the MG5 card (see references/mg5_card_template.mg5)
-# 2. Run MG5 — the heptapod MadGraphFromRunCard tool, or mg5_aMC directly
+# 1. Write the MG5 card (see references/mg5_card_template.mg5). For a batch of
+#    launches or a scan, start it with `set automatic_html_opening False`:
+#    MG5 otherwise opens a browser page per launch. A handful of interactive
+#    runs can leave it on.
+# 2. Run MG5 — the heptapod MadGraphFromRunCard tool, or mg5_aMC directly.
+#    For another run of a compiled process (more events, another seed, changed
+#    cuts) pass process_dir=<existing process dir> instead of rebuilding it.
 # 3. Verify the LHE before histogramming: check particle count per event (P11)
 # 4. Convert LHE → JSONL → numpy via heptapod LHEToJSONL / EventJSONLToNumpy
 # 5. Truth-level cross-check on a single event before processing the bulk
@@ -120,3 +162,6 @@ parameters — check the UFO first; see the `feynrules` skill.
 - **`references/decay_chains.md`** — decay-chain syntax in depth: a decision
   tree for commas, parentheses, `NP=N`, MadSpin and narrow-width.
 - **`references/error_decoder.md`** — error message → real cause → fix.
+- **`references/many_diagrams.md`** — coupling orders, squared orders, diagram
+  filters and restriction cards for high-multiplicity processes; how restricted
+  runs relate to the coherent rate.

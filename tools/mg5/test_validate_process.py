@@ -49,3 +49,32 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn(); print(f"[ok] {name}")
     print("all validate_process tests passed")
+
+
+# --- Sandbox-relative model paths ------------------------------------------ #
+# MG5 runs in a temporary directory, so 'import model inputs/model' fails
+# with "Path inputs/model is not a valid pathname"; the tool makes the path
+# absolute first.
+
+def _vp(base, model):
+    from tools.mg5.validate_process import ValidateProcessTool
+    return ValidateProcessTool(mg5_path="/nonexistent", base_directory=str(base),
+                               process="generate mu- > e- ve~ vm", model=model)
+
+
+def test_relative_model_path_made_absolute(tmp_path):
+    (tmp_path / "inputs" / "model").mkdir(parents=True)
+    card = _vp(tmp_path, "inputs/model")._build_card("/x/PROC")
+    assert card.splitlines()[0] == f"import model {tmp_path / 'inputs' / 'model'}"
+
+
+def test_relative_model_path_keeps_restriction(tmp_path):
+    (tmp_path / "work" / "sm_ufo").mkdir(parents=True)
+    card = _vp(tmp_path, "work/sm_ufo-no_b_mass")._build_card("/x/PROC")
+    assert card.splitlines()[0] == f"import model {tmp_path / 'work' / 'sm_ufo'}-no_b_mass"
+
+
+def test_stock_and_absolute_models_unchanged(tmp_path):
+    assert _vp(tmp_path, "sm")._build_card("/x/P").splitlines()[0] == "import model sm"
+    assert _vp(tmp_path, "sm-no_b_mass")._build_card("/x/P").splitlines()[0] == "import model sm-no_b_mass"
+    assert _vp(tmp_path, "/abs/ufo")._build_card("/x/P").splitlines()[0] == "import model /abs/ufo"

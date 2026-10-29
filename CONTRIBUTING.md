@@ -742,6 +742,26 @@ Test files should:
 - Remove ALL generated files (check for hidden/temp files)
 - Provide clear feedback about what was cleaned
 
+### 11. Coding Style
+
+The Pythia and Sherpa toolkits (`tools/pythia`, `tools/sherpa`, `tools/rivet`, `tools/cpp`,
+`tools/events`, `tools/event_io.py`, `tools/tests` and the Pythia skill's
+reference programs) follows the line length of Pythia's own `CODINGSTYLE`,
+79 columns, so that it reads like the program it fronts. `ruff.toml` at the
+repository root holds the configuration; the formatter is `ruff format` and
+the checks are pyflakes, the non-layout pycodestyle errors and line length:
+
+```bash
+pip install ruff
+ruff format .          # apply the layout
+ruff check .           # must report no errors
+```
+
+C++ in those directories (the drivers and the skill templates)
+follows Pythia's `CODINGSTYLE` as written: camelCase names, 79 columns,
+two-space indentation, `//====` and `//----` section separators, one
+statement per line, `int` for integers, and comments on their own lines.
+
 ---
 
 ## Tool Categories

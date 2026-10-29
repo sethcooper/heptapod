@@ -1,0 +1,4 @@
+Beams:eCM = 13000.
+HardQCD:hardbbbar = on
+PhaseSpace:pTHatMin = 20.
+Next:numberCount = 0

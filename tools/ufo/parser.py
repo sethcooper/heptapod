@@ -144,6 +144,10 @@ def parse_particles(particles_py_path: str) -> List[Dict[str, Any]]:
         rec["var"] = a["var"]
         rec["anti_of"] = a["of"]
         rec["name"] = parent.get("antiname", rec.get("name"))
+        # Each record is its own particle, so its antiparticle is the parent.
+        rec["antiname"] = parent.get("name", rec["name"])
+        if "antitexname" in parent:
+            rec["texname"], rec["antitexname"] = parent["antitexname"], parent.get("texname")
         for key in ("pdg_code", "charge"):
             v = rec.get(key)
             if isinstance(v, (int, float, Fraction)):

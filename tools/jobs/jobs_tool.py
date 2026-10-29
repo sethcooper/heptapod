@@ -35,7 +35,9 @@ class SubmitJobTool(BaseTool):
     Use this instead of calling the tool directly whenever the run may take
     more than ~2 minutes (UFO compiles, validatelagrangian on a large model,
     validateufomodel with madgraph_check, MadGraph or Pythia event
-    generation, Delphes on a large sample, reverselagrangian). Returns a
+    generation, Delphes on a large sample, reverselagrangian), and to run
+    many calls of a tool in parallel -- e.g. one squared amplitude, rate or
+    MadGraph run per channel -- without an agent per call. Returns a
     job_id immediately; poll with jobstatus and fetch the output with
     jobresult, continuing other work in between. Stop it with canceljob.
 

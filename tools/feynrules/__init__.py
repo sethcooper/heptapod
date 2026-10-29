@@ -11,6 +11,8 @@ Tools:
     FeynRulesToUFOTool          — compile a .fr model to a UFO directory
     ValidateLagrangianTool  — run FeynRules' consistency checks only
     ValidateUFOModelTool    — compile to a UFO, then check what was produced
+    WriteFeynArtsModel      — write a FeynArts model, with a manifest and a linter
+    WriteToyModel           — a .fr for a toy theory from a compact spec
 
 Library:
     parse_check_verdicts        — read check verdicts out of generator stdout
@@ -19,12 +21,16 @@ Library:
 """
 from .feynrules import FeynRulesToUFOTool, ValidateLagrangianTool
 from .validate_tool import ValidateUFOModelTool
+from .feynarts_model import WriteFeynArtsModel
+from .toy_model import WriteToyModel
 from .lagrangian_checks import parse_check_verdicts, failed_checks, summarise
 
 __all__ = [
     "FeynRulesToUFOTool",
     "ValidateLagrangianTool",
     "ValidateUFOModelTool",
+    "WriteFeynArtsModel",
+    "WriteToyModel",
     "parse_check_verdicts",
     "failed_checks",
     "summarise",

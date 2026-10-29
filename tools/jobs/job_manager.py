@@ -68,6 +68,8 @@ WHITELIST: Dict[str, Tuple[str, str]] = {
     "reverselagrangian": ("tools.reverse.reverse_tool", "ReverseLagrangianTool"),
     "pythiafromruncard": ("tools.pythia", "PythiaFromRunCardTool"),
     "delphesfromhepmc": ("tools.delphes.delphes", "DelphesFromHepMCTool"),
+    "enumerateprocesses": ("tools.feyngraph.catalogue_tools", "EnumerateProcessesTool"),
+    "validateprocesscatalogue": ("tools.feyngraph.catalogue_tools", "ValidateProcessCatalogueTool"),
     # Fast and dependency-free — used by the offline test suite to exercise
     # the full submit -> run -> result path without Wolfram/MG5.
     "audittrail": ("tools.logging.audit_tool", "AuditTrailTool"),
@@ -164,7 +166,8 @@ def submit(
     """
     if tool_name not in WHITELIST:
         raise ValueError(
-            f"tool '{tool_name}' is not submittable; whitelist: {sorted(WHITELIST)}"
+            f"tool '{tool_name}' is not submittable; call it directly as an "
+            f"ordinary tool. Only these long-running tools take jobs: {sorted(WHITELIST)}"
         )
     cls = resolve_tool(tool_name)
     err = validate_args(cls, tool_args)

@@ -10,6 +10,8 @@ Converts between SI metric prefixes for the same base unit.
 For example: meters ↔ nanometers, grams ↔ kilograms, seconds ↔ milliseconds.
 """
 
+from typing import Optional
+
 from orchestral.tools.base.tool import BaseTool
 from orchestral.tools.base.field_utils import RuntimeField, StateField
 import re
@@ -51,7 +53,7 @@ class MetricPrefixConverter(BaseTool):
     """
 
     # Runtime field: the conversion request string
-    conversion_request: str = RuntimeField(
+    conversion_request: Optional[str] = RuntimeField(
         default=None,
         description=(
             "Conversion request in format '<value> <unit> to <target_unit>'. "

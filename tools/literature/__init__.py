@@ -19,8 +19,12 @@ Literature tools: find a paper, then get its text in a form worth reading.
                 longer say what they meant. ArxivPDFTool retrieves the
                 PDF that tool reads.
 
+  **Cite it.**  QuoteSourceTool finds a statement in what was fetched and
+                returns it verbatim with file, sha256, lines, section,
+                equation label and page.
+
   **Where.**    Everything retrieved for one paper lands together in
-                <output_dir>/<arxiv_id>/ -- the PDF, the extracted source
+                <output_dir>/<arxiv_id>v<N>/ -- the PDF, the extracted source
                 tree, and the normalized LaTeX -- so a corpus is one
                 directory per paper.
 
@@ -44,6 +48,7 @@ from .literature_tools import (
     ArxivSourceTool,
     ArxivPDFTool,
 )
+from .quote_tool import QuoteSourceTool
 
 __all__ = [
     # find
@@ -53,6 +58,8 @@ __all__ = [
     "ArxivPDFTool",
     "PDFToTeXTool",
     "pdf_to_tex",
+    # cite
+    "QuoteSourceTool",
     "page_to_tex",
     # interfaces
     "ArxivInterface",

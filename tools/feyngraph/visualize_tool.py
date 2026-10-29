@@ -74,7 +74,7 @@ class VisualizeDiagramsTool(BaseTool):
     )
     model: str = RuntimeField(
         default="SM",
-        description='Physics model ("SM" or path to UFO model)'
+        description="SM uses FeynGraph's built-in local model; otherwise an explicit UFO directory (relative to workspace)"
     )
     output_prefix: str = RuntimeField(
         default="diagram",
@@ -112,7 +112,7 @@ class VisualizeDiagramsTool(BaseTool):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            fg_interface = FeynGraphInterface(model=self.model)
+            fg_interface = FeynGraphInterface(model=self.model, base_directory=self.base_directory)
         except ImportError as e:
             return self.format_error(
                 error="FeynGraph Not Available",

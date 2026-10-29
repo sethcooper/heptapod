@@ -95,6 +95,8 @@ FEYNGRAPH_TO_NDA_MAP: Dict[str, str] = {
 
 # Add additional FeynGraph notation variants
 FEYNGRAPH_TO_NDA_MAP.update({
+    "ta-": "tau-",
+    "ta+": "tau+",
     # FeynGraph sometimes uses these forms
     "e": "e-",
     "mu": "mu-",

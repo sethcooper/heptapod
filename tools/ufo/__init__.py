@@ -29,6 +29,7 @@ and no way to look inside; everything else here is called by other tools.
     parse_parameters          — external and internal parameter declarations
     evaluate_parameters       — resolved to numbers, in dependency order
     parse_couplings           — GC_* expressions
+    parse_coupling_orders     — GC_* coupling orders, {"QCD": 1}
     evaluate_couplings        — those, as complex numbers
     vertex_couplings          — vertices with the (colour, lorentz) key intact
     ufo_gauge                 — unitary or Feynman, from the particle content
@@ -39,6 +40,9 @@ and no way to look inside; everything else here is called by other tools.
     safe_eval_width           — evaluate a width in a whitelisted namespace
     analytic_scalar_lq_width  — closed form for a scalar leptoquark width
     compare_width             — a UFO width against a closed-form expectation
+    parse_lorentz             — Lorentz structures: spins and tensor string
+    read_slha                 — an SLHA card as {(block, codes): value}
+    card_overrides            — a card as external-parameter overrides
 """
 
 from .parser import (
@@ -52,12 +56,15 @@ from .evaluate import (
     evaluate_parameters,
     is_ghost,
     is_goldstone,
+    parse_coupling_orders,
     parse_couplings,
     parse_parameters,
     safe_eval,
     ufo_gauge,
     vertex_couplings,
 )
+from .lorentz import parse_lorentz
+from .cards import card_overrides, read_slha
 from .width_gate import (
     analytic_scalar_lq_width,
     compare_width,
@@ -68,6 +75,9 @@ from .width_gate import (
 )
 
 __all__ = [
+    "card_overrides",
+    "parse_lorentz",
+    "read_slha",
     "fold_number",
     "parse_particles",
     "parse_vertices",
@@ -76,6 +86,7 @@ __all__ = [
     "evaluate_parameters",
     "is_ghost",
     "is_goldstone",
+    "parse_coupling_orders",
     "parse_couplings",
     "parse_parameters",
     "safe_eval",

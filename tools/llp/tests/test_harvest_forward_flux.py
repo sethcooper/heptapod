@@ -234,6 +234,34 @@ def test_missing_cross_section_errors():
     print("[OK] normalization refuses to run without a cross section")
 
 
+def test_root_dataset_harvests_identically():
+    """The same events stored as ROOT harvest to exactly the JSONL result:
+    generation writes ROOT by default, and the container must not change the
+    flux."""
+    try:
+        import uproot  # noqa: F401
+        from tools import event_io
+    except ImportError:
+        print("[SKIP] uproot not installed")
+        return
+    print(">> ROOT and JSONL datasets harvest identically ...")
+    _setup()
+    base = Path(base_directory)
+    events = event_io.load_events(str(base / "events.jsonl"))
+    with event_io.EventWriter(str(base / "events.root")) as writer:
+        writer.write_reduced(events)
+
+    from_jsonl = json.loads(_tool(manifest_path="manifest.json", output_dir="flux_jsonl")._run())
+    from_root = json.loads(_tool(manifest_path="manifest.json", output_dir="flux_root",
+                                 pythia_events_path="events.root")._run())
+    assert from_root["status"] == "ok", from_root
+    for name in set(PARENTS.values()):
+        a, b = _species(from_jsonl, name), _species(from_root, name)
+        assert a["n_parents"] == b["n_parents"], (name, a, b)
+        assert math.isclose(a["sum_weights"], b["sum_weights"], rel_tol=1e-12)
+    print("[OK] ROOT and JSONL give the same flux")
+
+
 def run_all():
     try:
         test_path_traversal_prevention()
@@ -242,6 +270,7 @@ def run_all():
         test_prescale_preserves_weight_sum()
         test_cap_bounds_count_preserves_weight()
         test_missing_cross_section_errors()
+        test_root_dataset_harvests_identically()
         print("\nAll HarvestForwardFlux tests passed.")
     finally:
         shutil.rmtree(base_directory, ignore_errors=True)

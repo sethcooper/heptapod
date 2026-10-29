@@ -102,8 +102,29 @@ class ValidateProcessTool(BaseTool):
     def _setup(self):
         self.base_directory = os.path.abspath(self.base_directory)
 
+    def _model_arg(self) -> str:
+        """The model as MG5 should see it.
+
+        MG5 runs in a temporary directory, so a sandbox-relative UFO path
+        ('inputs/model') must be made absolute against base_directory or MG5
+        reports 'Path inputs/model is not a valid pathname'.  A restriction
+        suffix ('inputs/model-no_b_mass') is kept.  Bare stock names and
+        absolute paths pass through unchanged.
+        """
+        model = str(self.model).strip()
+        if not model or os.path.isabs(model):
+            return model
+        base = os.path.abspath(self.base_directory)
+        cand = os.path.join(base, model)
+        if os.path.isdir(cand):
+            return os.path.abspath(cand)
+        head, sep, tail = model.rpartition("-")
+        if sep and head and os.path.isdir(os.path.join(base, head)):
+            return os.path.abspath(os.path.join(base, head)) + "-" + tail
+        return model
+
     def _build_card(self, outdir: str) -> str:
-        lines = [f"import model {self.model}"]
+        lines = [f"import model {self._model_arg()}"]
         raw = [l.strip() for l in str(self.process).splitlines() if l.strip()]
         if not raw:
             raw = [str(self.process).strip()]

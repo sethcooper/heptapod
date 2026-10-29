@@ -99,7 +99,7 @@ class EnumerateDiagramsTool(BaseTool):
     )
     model: str = RuntimeField(
         default="SM",
-        description='Physics model ("SM" or path to UFO model)'
+        description="SM uses FeynGraph's built-in local model; otherwise an explicit UFO directory (relative to workspace)"
     )
     save_diagrams: bool = RuntimeField(
         default=True,
@@ -161,7 +161,7 @@ class EnumerateDiagramsTool(BaseTool):
 
         # Initialize FeynGraph interface
         try:
-            fg_interface = FeynGraphInterface(model=self.model)
+            fg_interface = FeynGraphInterface(model=self.model, base_directory=self.base_directory)
         except ImportError as e:
             return self.format_error(
                 error="FeynGraph Not Available",

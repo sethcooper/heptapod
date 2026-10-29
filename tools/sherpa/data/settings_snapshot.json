@@ -1,0 +1,2217 @@
+{
+ "lists": {
+  "kfactors": [
+   "EWVirt",
+   "MINLO",
+   "MPI",
+   "None",
+   "VAR"
+  ],
+  "me_generators": [
+   "Amegic",
+   "Comix",
+   "External",
+   "Internal"
+  ],
+  "nlomc_generators": [
+   "MC@NLO_CSS",
+   "MC@NLO_Dire"
+  ],
+  "ps_generators": [
+   "Decay2",
+   "Default",
+   "NChannel",
+   "Rambo",
+   "RamboKK",
+   "SChannel",
+   "TChannel",
+   "UChannel",
+   "VHAAG",
+   "VHAAG_ND",
+   "VHAAG_res"
+  ],
+  "scale_setters": [
+   "Democratic",
+   "FASTJET",
+   "METS",
+   "MINLO",
+   "MPI",
+   "VAR",
+   "VBF"
+  ],
+  "selectors": [
+   "Acoplanarity",
+   "DEta",
+   "DPhi",
+   "DR",
+   "DR(y)",
+   "DY",
+   "Decay",
+   "Decay2",
+   "DecayMass",
+   "DressedParticleSelector",
+   "E",
+   "ET",
+   "ETmis",
+   "Eta",
+   "FastjetFinder",
+   "FastjetSelector",
+   "FastjetVeto",
+   "HT",
+   "INEL",
+   "IsolationCut",
+   "Isolation_Selector",
+   "Jet_Selector",
+   "MT2",
+   "MT2_v2",
+   "Mass",
+   "MinSelector",
+   "N",
+   "NJ",
+   "NJetFinder",
+   "PT",
+   "PT2",
+   "PTmis",
+   "PZIN",
+   "PhiStar",
+   "Polar_Angle",
+   "Q2",
+   "T_Channel",
+   "VariableSelector",
+   "Y"
+  ],
+  "shower_generators": [
+   "CSS",
+   "Dire"
+  ]
+ },
+ "schema": "sherpa-settings-snapshot-1.0",
+ "settings": {
+  "1/ALPHAQED(0)": {
+   "default": "137.03599976",
+   "source": "report"
+  },
+  "ABS_ERROR": {
+   "default": "0",
+   "source": "report"
+  },
+  "AHADIC:ALPHA_B": {
+   "default": "14.2",
+   "source": "report"
+  },
+  "AHADIC:ALPHA_D": {
+   "default": "3.4",
+   "source": "report"
+  },
+  "AHADIC:ALPHA_G": {
+   "default": "0.97",
+   "source": "report"
+  },
+  "AHADIC:ALPHA_H": {
+   "default": "-0.6",
+   "source": "report"
+  },
+  "AHADIC:ALPHA_L": {
+   "default": "3.9",
+   "source": "report"
+  },
+  "AHADIC:BARYON_FRACTION": {
+   "default": "0.17",
+   "source": "report"
+  },
+  "AHADIC:BEAUTYBARYON_ENHANCEMENT": {
+   "default": "0.8",
+   "source": "report"
+  },
+  "AHADIC:BEAUTYCHARM_ENHANCEMENT": {
+   "default": "1",
+   "source": "report"
+  },
+  "AHADIC:BEAUTYSTRANGE_ENHANCEMENT": {
+   "default": "1.4",
+   "source": "report"
+  },
+  "AHADIC:BETA_B": {
+   "default": "1.6",
+   "source": "report"
+  },
+  "AHADIC:BETA_D": {
+   "default": "0.72",
+   "source": "report"
+  },
+  "AHADIC:BETA_H": {
+   "default": "1.8",
+   "source": "report"
+  },
+  "AHADIC:BETA_L": {
+   "default": "0.18",
+   "source": "report"
+  },
+  "AHADIC:CHARMBARYON_ENHANCEMENT": {
+   "default": "8",
+   "source": "report"
+  },
+  "AHADIC:CHARMSTRANGE_ENHANCEMENT": {
+   "default": "2",
+   "source": "report"
+  },
+  "AHADIC:CLUSTER_SPLITTING_MODE": {
+   "default": "2",
+   "source": "report"
+  },
+  "AHADIC:DECAY_THRESHOLD": {
+   "default": "0.02",
+   "source": "report"
+  },
+  "AHADIC:DIRECT_TRANSITIONS": {
+   "default": "1",
+   "source": "report"
+  },
+  "AHADIC:DI_PION_THRESHOLD": {
+   "default": "0.3",
+   "source": "report"
+  },
+  "AHADIC:ETA_MODIFIER": {
+   "default": "2.2",
+   "source": "report"
+  },
+  "AHADIC:ETA_PRIME_MODIFIER": {
+   "default": "4.5",
+   "source": "report"
+  },
+  "AHADIC:GAMMA_B": {
+   "default": "8.1",
+   "source": "report"
+  },
+  "AHADIC:GAMMA_D": {
+   "default": "0.77",
+   "source": "report"
+  },
+  "AHADIC:GAMMA_H": {
+   "default": "0.024",
+   "source": "report"
+  },
+  "AHADIC:GAMMA_L": {
+   "default": "0.48",
+   "source": "report"
+  },
+  "AHADIC:GLUON_DECAY_MODE": {
+   "default": "0",
+   "source": "report"
+  },
+  "AHADIC:KT_0": {
+   "default": "1.21",
+   "source": "report"
+  },
+  "AHADIC:KT_ORDER": {
+   "default": "0",
+   "source": "report"
+  },
+  "AHADIC:MASS_EXPONENT": {
+   "default": "0",
+   "source": "report"
+  },
+  "AHADIC:MIN_MASS2": {
+   "default": "0.1",
+   "source": "report"
+  },
+  "AHADIC:MULTI_WEIGHT_R0L0_DELTA_3/2": {
+   "default": "0.15",
+   "source": "report"
+  },
+  "AHADIC:MULTI_WEIGHT_R0L0_N_1/2": {
+   "default": "1",
+   "source": "report"
+  },
+  "AHADIC:MULTI_WEIGHT_R0L0_PSEUDOSCALARS": {
+   "default": "1",
+   "source": "report"
+  },
+  "AHADIC:MULTI_WEIGHT_R0L0_TENSORS2": {
+   "default": "1.5",
+   "source": "report"
+  },
+  "AHADIC:MULTI_WEIGHT_R0L0_VECTORS": {
+   "default": "2.5",
+   "source": "report"
+  },
+  "AHADIC:MULTI_WEIGHT_R0L1_AXIALVECTORS": {
+   "default": "0",
+   "source": "report"
+  },
+  "AHADIC:MULTI_WEIGHT_R0L1_SCALARS": {
+   "default": "0",
+   "source": "report"
+  },
+  "AHADIC:MULTI_WEIGHT_R0L2_VECTORS": {
+   "default": "0.5",
+   "source": "report"
+  },
+  "AHADIC:MULTI_WEIGHT_R1L0_N_1/2": {
+   "default": "0.1",
+   "source": "report"
+  },
+  "AHADIC:MULTI_WEIGHT_R1_1L0_N_1/2": {
+   "default": "0",
+   "source": "report"
+  },
+  "AHADIC:MULTI_WEIGHT_R2L0_N_1/2": {
+   "default": "0",
+   "source": "report"
+  },
+  "AHADIC:M_BIND_0": {
+   "default": "0.12",
+   "source": "report"
+  },
+  "AHADIC:M_BIND_1": {
+   "default": "0.5",
+   "source": "report"
+  },
+  "AHADIC:M_BOTTOM": {
+   "default": "5.1",
+   "source": "report"
+  },
+  "AHADIC:M_CHARM": {
+   "default": "1.8",
+   "source": "report"
+  },
+  "AHADIC:M_DIQUARK_OFFSET": {
+   "default": "0.3",
+   "source": "report"
+  },
+  "AHADIC:M_GLUE": {
+   "default": "0",
+   "source": "report"
+  },
+  "AHADIC:M_STRANGE": {
+   "default": "0.4",
+   "source": "report"
+  },
+  "AHADIC:M_UP_DOWN": {
+   "default": "0.3",
+   "source": "report"
+  },
+  "AHADIC:Mixing_0+": {
+   "default": "-0.246091424531",
+   "source": "report"
+  },
+  "AHADIC:Mixing_1-": {
+   "default": "0.635299847726",
+   "source": "report"
+  },
+  "AHADIC:Mixing_2+": {
+   "default": "0.471238898038",
+   "source": "report"
+  },
+  "AHADIC:Mixing_3-": {
+   "default": "0.5411",
+   "source": "report"
+  },
+  "AHADIC:Mixing_4+": {
+   "default": "0.6283",
+   "source": "report"
+  },
+  "AHADIC:OPEN_THRESHOLD": {
+   "default": "0.1",
+   "source": "report"
+  },
+  "AHADIC:PI_PHOTON_THRESHOLD": {
+   "default": "0.15",
+   "source": "report"
+  },
+  "AHADIC:PROMPT_DECAY_EXPONENT": {
+   "default": "-1",
+   "source": "report"
+  },
+  "AHADIC:PT_MAX": {
+   "default": "0.68",
+   "source": "report"
+  },
+  "AHADIC:P_QQ1_by_P_QQ0": {
+   "default": "0.6",
+   "source": "report"
+  },
+  "AHADIC:P_QS_by_P_QQ_norm": {
+   "default": "0.56",
+   "source": "report"
+  },
+  "AHADIC:P_SS_by_P_QQ_norm": {
+   "default": "0.056",
+   "source": "report"
+  },
+  "AHADIC:REMNANT_CLUSTER_MODE": {
+   "default": "2",
+   "source": "report"
+  },
+  "AHADIC:SINGLETBARYON_MODIFIER": {
+   "default": "1.8",
+   "source": "report"
+  },
+  "AHADIC:SINGLET_MODIFIER": {
+   "default": "2",
+   "source": "report"
+  },
+  "AHADIC:STRANGE_FRACTION": {
+   "default": "0.46",
+   "source": "report"
+  },
+  "AHADIC:TRANSITION_THRESHOLD": {
+   "default": "0.51",
+   "source": "report"
+  },
+  "ALPHAQED_DEFAULT_SCALE": {
+   "default": "",
+   "source": "manual"
+  },
+  "ALPHAS(MZ)": {
+   "default": "0.118",
+   "source": "report"
+  },
+  "ALPHAS:FREEZE_VALUE": {
+   "default": "1",
+   "source": "report"
+  },
+  "ALPHAS:PDF_SET_VERSION": {
+   "default": "0",
+   "source": "report"
+  },
+  "ALPHAS:USE_PDF": {
+   "default": "1",
+   "source": "report"
+  },
+  "AMEGIC:DEFAULT_GAUGE": {
+   "default": "1",
+   "source": "report"
+  },
+  "AMEGIC:PARTIAL_COMMIT": {
+   "default": "0",
+   "source": "report"
+  },
+  "AMISIC:E(ref)": {
+   "default": "7000",
+   "source": "report"
+  },
+  "AMISIC:Eta": {
+   "default": "0.0808",
+   "source": "report"
+  },
+  "AMISIC:MU_F_FACTOR": {
+   "default": "1",
+   "source": "report"
+  },
+  "AMISIC:MU_R_FACTOR": {
+   "default": "0.5",
+   "source": "report"
+  },
+  "AMISIC:MU_R_SCHEME": {
+   "default": "PT",
+   "source": "report"
+  },
+  "AMISIC:PT_0": {
+   "default": "2.05",
+   "source": "report"
+  },
+  "AMISIC:PT_0(IR)": {
+   "default": "0.5",
+   "source": "report"
+  },
+  "AMISIC:PT_0(ref)": {
+   "default": "2.05",
+   "source": "report"
+  },
+  "AMISIC:PT_Min": {
+   "default": "1.92",
+   "source": "report"
+  },
+  "AMISIC:PT_Min(ref)": {
+   "default": "1.92",
+   "source": "report"
+  },
+  "AMISIC:PomeronIntercept": {
+   "default": "0.0808",
+   "source": "report"
+  },
+  "AMISIC:PomeronSlope": {
+   "default": "0.25",
+   "source": "report"
+  },
+  "AMISIC:ReggeonIntercept": {
+   "default": "-0.4525",
+   "source": "report"
+  },
+  "AMISIC:SIGMA_ND_NORM": {
+   "default": "1.001",
+   "source": "report"
+  },
+  "AMISIC:TriplePomeronCoupling": {
+   "default": "0.318",
+   "source": "report"
+  },
+  "AMISIC:nMC_points": {
+   "default": "1000",
+   "source": "report"
+  },
+  "AMISIC:nPT_bins": {
+   "default": "200",
+   "source": "report"
+  },
+  "AMISIC:nS_bins": {
+   "default": "40",
+   "source": "report"
+  },
+  "ANALYSIS": {
+   "default": "",
+   "source": "report"
+  },
+  "ANALYSIS_OUTPUT": {
+   "default": "Analysis/",
+   "source": "report"
+  },
+  "ASSOCIATED_CONTRIBUTIONS_VARIATIONS": {
+   "default": "",
+   "source": "report"
+  },
+  "AS_FORM": {
+   "default": "Smooth",
+   "source": "report"
+  },
+  "BATCH_MODE": {
+   "default": "1",
+   "source": "report"
+  },
+  "BBR_PDF_LIBRARY": {
+   "default": "",
+   "source": "report"
+  },
+  "BEAMS": {
+   "default": "0, 0",
+   "source": "report"
+  },
+  "BEAM_1": {
+   "default": "0",
+   "source": "report"
+  },
+  "BEAM_2": {
+   "default": "0",
+   "source": "report"
+  },
+  "BEAM_ENERGIES": {
+   "default": "0, 0",
+   "source": "report"
+  },
+  "BEAM_ENERGY_1": {
+   "default": "0",
+   "source": "report"
+  },
+  "BEAM_ENERGY_2": {
+   "default": "0",
+   "source": "report"
+  },
+  "BEAM_MODE": {
+   "default": "Collider",
+   "source": "report"
+  },
+  "BEAM_POLARIZATIONS": {
+   "default": "0, 0",
+   "source": "report"
+  },
+  "BEAM_REMNANTS": {
+   "default": "1",
+   "source": "report"
+  },
+  "BEAM_RESCATTERING": {
+   "default": "None",
+   "source": "report"
+  },
+  "BEAM_SPECTRA": {
+   "default": "Monochromatic, Monochromatic",
+   "source": "report"
+  },
+  "BEAM_SPECTRUM_1": {
+   "default": "Monochromatic",
+   "source": "report"
+  },
+  "BEAM_SPECTRUM_2": {
+   "default": "Monochromatic",
+   "source": "report"
+  },
+  "BRH_VMODE": {
+   "default": "0",
+   "source": "report"
+  },
+  "BUNCHES": {
+   "default": "",
+   "source": "report"
+  },
+  "CHECK_LIBLOCK": {
+   "default": "0",
+   "source": "report"
+  },
+  "CHECK_SETTINGS": {
+   "default": "1",
+   "source": "report"
+  },
+  "CHECK_WEIGHT": {
+   "default": "0",
+   "source": "report"
+  },
+  "CITATION_DEPTH": {
+   "default": "1",
+   "source": "report"
+  },
+  "CI_OMODE": {
+   "default": "1",
+   "source": "report"
+  },
+  "CKM:Order": {
+   "default": "0",
+   "source": "report"
+  },
+  "CKM:Output": {
+   "default": "0",
+   "source": "report"
+  },
+  "COLOR_SCHEME": {
+   "default": "0",
+   "source": "report"
+  },
+  "COLOUR_RECONNECTIONS:ETA_Q": {
+   "default": "0.194",
+   "source": "report"
+  },
+  "COLOUR_RECONNECTIONS:ETA_R": {
+   "default": "0.16",
+   "source": "report"
+  },
+  "COLOUR_RECONNECTIONS:KAPPA": {
+   "default": "1",
+   "source": "report"
+  },
+  "COLOUR_RECONNECTIONS:MODE": {
+   "default": "1",
+   "source": "report"
+  },
+  "COLOUR_RECONNECTIONS:PMODE": {
+   "default": "Log",
+   "source": "report"
+  },
+  "COLOUR_RECONNECTIONS:Q_0": {
+   "default": "1",
+   "source": "report"
+  },
+  "COLOUR_RECONNECTIONS:RESHUFFLE": {
+   "default": "0.111111111111",
+   "source": "report"
+  },
+  "COLOUR_RECONNECTIONS:R_0": {
+   "default": "100",
+   "source": "report"
+  },
+  "COMIX:AEXP": {
+   "default": "0.9",
+   "source": "report"
+  },
+  "COMIX:BMODE": {
+   "default": "1",
+   "source": "report"
+  },
+  "COMIX:CHECK_POLES": {
+   "default": "0",
+   "source": "report"
+  },
+  "COMIX:ECMODE": {
+   "default": "2",
+   "source": "report"
+  },
+  "COMIX:ITMAX": {
+   "default": "1000000",
+   "source": "report"
+  },
+  "COMIX:ITMIN": {
+   "default": "1000",
+   "source": "report"
+  },
+  "COMIX:MFAC": {
+   "default": "1",
+   "source": "report"
+  },
+  "COMIX:N_GPL": {
+   "default": "3",
+   "source": "report"
+  },
+  "COMIX:OMODE": {
+   "default": "3",
+   "source": "report"
+  },
+  "COMIX:PARTIAL_COMMIT": {
+   "default": "0",
+   "source": "report"
+  },
+  "COMIX:PG_MODE": {
+   "default": "0",
+   "source": "report"
+  },
+  "COMIX:PMODE": {
+   "default": "D",
+   "source": "report"
+  },
+  "COMIX:PS_ADD_ANISO": {
+   "default": "0",
+   "source": "report"
+  },
+  "COMIX:PS_CHTH": {
+   "default": "0.01",
+   "source": "report"
+  },
+  "COMIX:SEXP": {
+   "default": "1",
+   "source": "report"
+  },
+  "COMIX:SPEAK": {
+   "default": "1",
+   "source": "report"
+  },
+  "COMIX:SRBASE": {
+   "default": "1.05",
+   "source": "report"
+  },
+  "COMIX:STEXP": {
+   "default": "0.001",
+   "source": "report"
+  },
+  "COMIX:TEXP": {
+   "default": "0.9",
+   "source": "report"
+  },
+  "COMIX:THEXP": {
+   "default": "1.5",
+   "source": "report"
+  },
+  "COMIX:TMODE": {
+   "default": "1",
+   "source": "report"
+  },
+  "COMIX:VINTS": {
+   "default": "8",
+   "source": "report"
+  },
+  "COMIX:VL_MODE": {
+   "default": "0",
+   "source": "report"
+  },
+  "COMIX:VMODE": {
+   "default": "1",
+   "source": "report"
+  },
+  "COMIX:VSOPT": {
+   "default": "1",
+   "source": "report"
+  },
+  "COMIX:WF_MODE": {
+   "default": "0",
+   "source": "report"
+  },
+  "COMIX:ZMODE": {
+   "default": "0",
+   "source": "report"
+  },
+  "COMIX_DEFAULT_GAUGE": {
+   "default": "1",
+   "source": "report"
+  },
+  "COMPRESS_PARTONIC_DECAYS": {
+   "default": "1",
+   "source": "report"
+  },
+  "CORE_SCALE": {
+   "default": "",
+   "source": "manual"
+  },
+  "COUPLINGS": {
+   "default": "Alpha_QCD 1",
+   "source": "report"
+  },
+  "DEBUG_INTERVAL": {
+   "default": "0",
+   "source": "report"
+  },
+  "DEBUG_STEP": {
+   "default": "-1",
+   "source": "report"
+  },
+  "DECAYER": {
+   "default": "0",
+   "source": "report"
+  },
+  "DECAYMODEL": {
+   "default": "",
+   "source": "manual"
+  },
+  "DECOMPOSE_4G_VERTEX": {
+   "default": "1",
+   "source": "report"
+  },
+  "DIPOLES:ALPHA": {
+   "default": "1",
+   "source": "report"
+  },
+  "DIPOLES:ALPHA_FF": {
+   "default": "1",
+   "source": "report"
+  },
+  "DIPOLES:ALPHA_FI": {
+   "default": "1",
+   "source": "report"
+  },
+  "DIPOLES:ALPHA_IF": {
+   "default": "1",
+   "source": "report"
+  },
+  "DIPOLES:ALPHA_II": {
+   "default": "1",
+   "source": "report"
+  },
+  "DIPOLES:AMIN": {
+   "default": "1e-08",
+   "source": "report"
+  },
+  "DIPOLES:KAPPA": {
+   "default": "0.666666666667",
+   "source": "report"
+  },
+  "DIPOLES:KT2MAX": {
+   "default": "8317.44",
+   "source": "report"
+  },
+  "DIPOLES:NF_GSPLIT": {
+   "default": "5",
+   "source": "report"
+  },
+  "DIPOLES:SCHEME": {
+   "default": "CSS",
+   "source": "report"
+  },
+  "DM_ENERGY_DISTRIBUTION": {
+   "default": "1",
+   "source": "report"
+  },
+  "DM_RELATIVISTIC": {
+   "default": "1",
+   "source": "report"
+  },
+  "DM_TEMPERATURE": {
+   "default": "1",
+   "source": "report"
+  },
+  "DM_beam_weighted": {
+   "default": "1",
+   "source": "report"
+  },
+  "ENHANCE_XS": {
+   "default": "0",
+   "source": "report"
+  },
+  "ERROR": {
+   "default": "0.01",
+   "source": "report"
+  },
+  "EVENTS": {
+   "default": "100",
+   "source": "report"
+  },
+  "EVENT_DISPLAY_INTERVAL": {
+   "default": "100",
+   "source": "report"
+  },
+  "EVENT_GENERATION_MODE": {
+   "default": "PartiallyUnweighted",
+   "source": "report"
+  },
+  "EVENT_INPUT": {
+   "default": "",
+   "source": "report"
+  },
+  "EVENT_OUTPUT": {
+   "default": "",
+   "source": "report"
+  },
+  "EVENT_SEED_FILE": {
+   "default": "ran.stat.1234",
+   "source": "report"
+  },
+  "EVENT_SEED_MODE": {
+   "default": "0",
+   "source": "report"
+  },
+  "EVENT_TYPE": {
+   "default": "StandardPerturbative",
+   "source": "report"
+  },
+  "EVT_FILE_PATH": {
+   "default": ".",
+   "source": "report"
+  },
+  "EVT_OUTPUT": {
+   "default": "0",
+   "source": "report"
+  },
+  "EVT_OUTPUT_START": {
+   "default": "0",
+   "source": "report"
+  },
+  "EW_REN_SCHEME": {
+   "default": "Gmu",
+   "source": "report"
+  },
+  "EW_SCHEME": {
+   "default": "Gmu",
+   "source": "report"
+  },
+  "EXTERNAL_RNG": {
+   "default": "None",
+   "source": "report"
+  },
+  "EXTRAXS_CSS_APPROX_ME": {
+   "default": "0",
+   "source": "report"
+  },
+  "FACTORIZATION_SCALE_FACTOR": {
+   "default": "1",
+   "source": "report"
+  },
+  "FINISH_OPTIMIZATION": {
+   "default": "1",
+   "source": "report"
+  },
+  "FLAG_PARTONIC_DECAYS": {
+   "default": "1",
+   "source": "report"
+  },
+  "FRAGMENTATION": {
+   "default": "Ahadic",
+   "source": "report"
+  },
+  "FREEZE_PDF_FOR_LOW_Q": {
+   "default": "0",
+   "source": "report"
+  },
+  "GENERATE_RESULT_DIRECTORY": {
+   "default": "1",
+   "source": "report"
+  },
+  "GF": {
+   "default": "1.16639e-05",
+   "source": "report"
+  },
+  "GLOBAL_KFAC": {
+   "default": "0",
+   "source": "report"
+  },
+  "GMU_CMS_AQED_CONVENTION": {
+   "default": "0",
+   "source": "report"
+  },
+  "HARD_DECAYS:Apply_Branching_Ratios": {
+   "default": "1",
+   "source": "report"
+  },
+  "HARD_DECAYS:Channels:*:Status": {
+   "default": "1",
+   "source": "report"
+  },
+  "HARD_DECAYS:Channels:*:Width": {
+   "default": "0.2256",
+   "source": "report"
+  },
+  "HARD_DECAYS:Decay_Tau": {
+   "default": "0",
+   "source": "report"
+  },
+  "HARD_DECAYS:Enabled": {
+   "default": "0",
+   "source": "report"
+  },
+  "HARD_DECAYS:Int_Accuracy": {
+   "default": "0.01",
+   "source": "report"
+  },
+  "HARD_DECAYS:Int_NIter": {
+   "default": "2500",
+   "source": "report"
+  },
+  "HARD_DECAYS:Int_Target_Mode": {
+   "default": "0",
+   "source": "report"
+  },
+  "HARD_DECAYS:Mass_Smearing": {
+   "default": "1",
+   "source": "report"
+  },
+  "HARD_DECAYS:Min_Prop_Width": {
+   "default": "2.22507385851e-308",
+   "source": "report"
+  },
+  "HARD_DECAYS:Pol_Cross_Section:Enabled": {
+   "default": "0",
+   "source": "report"
+  },
+  "HARD_DECAYS:QED_Corrections": {
+   "default": "1",
+   "source": "report"
+  },
+  "HARD_DECAYS:Resolve_Decays": {
+   "default": "Threshold",
+   "source": "report"
+  },
+  "HARD_DECAYS:Result_Directory": {
+   "default": "Results/Decays",
+   "source": "report"
+  },
+  "HARD_DECAYS:Set_Widths": {
+   "default": "0",
+   "source": "report"
+  },
+  "HARD_DECAYS:Spin_Correlations": {
+   "default": "0",
+   "source": "report"
+  },
+  "HARD_DECAYS:Store_Results": {
+   "default": "0",
+   "source": "report"
+  },
+  "HARD_DECAYS:Use_HO_SM_Widths": {
+   "default": "1",
+   "source": "report"
+  },
+  "HELICITY_SCHEME": {
+   "default": "1",
+   "source": "report"
+  },
+  "HEPMC_EXTENDED_WEIGHTS": {
+   "default": "",
+   "source": "manual"
+  },
+  "HEPMC_TREE_LIKE": {
+   "default": "",
+   "source": "manual"
+  },
+  "HEPMC_USE_NAMED_WEIGHTS": {
+   "default": "",
+   "source": "manual"
+  },
+  "HISTOGRAM_OUTPUT_PRECISION": {
+   "default": "6",
+   "source": "report"
+  },
+  "IB_THRESHOLD_KILL": {
+   "default": "-1e+12",
+   "source": "report"
+  },
+  "IB_WHBINS": {
+   "default": "100",
+   "source": "report"
+  },
+  "INIT_ONLY": {
+   "default": "0",
+   "source": "report"
+  },
+  "INTEGRATION_ERROR": {
+   "default": "0.01",
+   "source": "report"
+  },
+  "INTEGRATOR": {
+   "default": "Default",
+   "source": "report"
+  },
+  "INTRINSIC_KPERP": {
+   "default": "1",
+   "source": "report"
+  },
+  "INT_MINSIJ_FACTOR": {
+   "default": "0",
+   "source": "report"
+  },
+  "ISR_E_ORDER": {
+   "default": "1",
+   "source": "report"
+  },
+  "ISR_E_SCHEME": {
+   "default": "2",
+   "source": "report"
+  },
+  "JET_CRITERION": {
+   "default": "",
+   "source": "manual"
+  },
+  "JET_MASS_THRESHOLD": {
+   "default": "10",
+   "source": "report"
+  },
+  "KFACTOR": {
+   "default": "None",
+   "source": "report"
+  },
+  "KFACTOR_ALLOW_MAPPING": {
+   "default": "1",
+   "source": "report"
+  },
+  "LHAPDF:DISALLOW_FLAVOUR": {
+   "default": "",
+   "source": "report"
+  },
+  "LHAPDF:USE_Q2LIMIT": {
+   "default": "1",
+   "source": "report"
+  },
+  "LHEF_PDF_NUMBER": {
+   "default": "-1",
+   "source": "report"
+  },
+  "LOG_FILE": {
+   "default": "",
+   "source": "report"
+  },
+  "MASSIVE_PS": {
+   "default": "",
+   "source": "report"
+  },
+  "MASSLESS_PS": {
+   "default": "",
+   "source": "report"
+  },
+  "MASS_SMEARING": {
+   "default": "",
+   "source": "manual"
+  },
+  "MC@NLO": {
+   "default": "",
+   "source": "manual"
+  },
+  "MCNLO_DADS": {
+   "default": "1",
+   "source": "report"
+  },
+  "MEH_EWADDMODE": {
+   "default": "0",
+   "source": "report"
+  },
+  "MEH_NLOADD": {
+   "default": "1",
+   "source": "report"
+  },
+  "MEH_QCDADDMODE": {
+   "default": "0",
+   "source": "report"
+  },
+  "MEMLEAK_WARNING_THRESHOLD": {
+   "default": "16777216",
+   "source": "report"
+  },
+  "MENLOPS_MAX_KFAC": {
+   "default": "10",
+   "source": "report"
+  },
+  "MEPS:ALLOW_SCALE_UNORDERING": {
+   "default": "0",
+   "source": "report"
+  },
+  "MEPS:CLUSTER_MODE": {
+   "default": "0 -- AND -- 360",
+   "source": "report"
+  },
+  "MEPS:CORE_SCALE": {
+   "default": "Default",
+   "source": "report"
+  },
+  "MEPS:MEPS_COLORSET_MODE": {
+   "default": "0",
+   "source": "report"
+  },
+  "MEPS:NLO_COUPLING_MODE": {
+   "default": "2",
+   "source": "report"
+  },
+  "MEPS:NLO_NMAX_ALLCONFIGS": {
+   "default": "-1",
+   "source": "report"
+  },
+  "MEPS:NMAX_ALLCONFIGS": {
+   "default": "-1",
+   "source": "report"
+  },
+  "MEPS:UNORDERED_SCALE": {
+   "default": "None",
+   "source": "report"
+  },
+  "MEPSNLO_PDFCT": {
+   "default": "1",
+   "source": "report"
+  },
+  "METS_BBAR_MODE": {
+   "default": "EnabledExclCluster",
+   "source": "report"
+  },
+  "ME_GENERATORS": {
+   "default": "Comix, Amegic, Internal",
+   "source": "report"
+  },
+  "ME_QED:CLUSTERING_ENABLED": {
+   "default": "1",
+   "source": "report"
+  },
+  "ME_QED:CLUSTERING_THRESHOLD": {
+   "default": "10",
+   "source": "report"
+  },
+  "ME_QED:ENABLED": {
+   "default": "1",
+   "source": "report"
+  },
+  "ME_QED:INCLUDE_RESONANCES": {
+   "default": "0",
+   "source": "report"
+  },
+  "ME_SIGNAL_GENERATOR": {
+   "default": "",
+   "source": "manual"
+  },
+  "MI_HANDLER": {
+   "default": "Amisic",
+   "source": "report"
+  },
+  "MODEL": {
+   "default": "SM",
+   "source": "report"
+  },
+  "MPI_OUTPUT": {
+   "default": "0",
+   "source": "report"
+  },
+  "MPI_PDF_LIBRARY": {
+   "default": "",
+   "source": "report"
+  },
+  "MPI_PDF_SET": {
+   "default": "",
+   "source": "report"
+  },
+  "MPI_PDF_SET_VERSIONS": {
+   "default": "",
+   "source": "report"
+  },
+  "MPI_PT_MAX": {
+   "default": "1e+12",
+   "source": "report"
+  },
+  "MPI_PT_Max_Fac": {
+   "default": "1",
+   "source": "report"
+  },
+  "MSG_LIMIT": {
+   "default": "20",
+   "source": "report"
+  },
+  "NLO_IMODE": {
+   "default": "IKP",
+   "source": "report"
+  },
+  "NLO_MUR_COEFFICIENT_FROM_VIRTUAL": {
+   "default": "1",
+   "source": "report"
+  },
+  "NLO_NF_CONVERSION_TERMS": {
+   "default": "None",
+   "source": "report"
+  },
+  "NLO_SMEAR_POWER": {
+   "default": "0.5",
+   "source": "report"
+  },
+  "NLO_SMEAR_THRESHOLD": {
+   "default": "0",
+   "source": "report"
+  },
+  "NLO_SUBTRACTION_MODE": {
+   "default": "QCD",
+   "source": "report"
+  },
+  "NO_ZERO_PDF": {
+   "default": "0",
+   "source": "report"
+  },
+  "NUM_ACCURACY": {
+   "default": "1e-10",
+   "source": "report"
+  },
+  "ORDER_ALPHAS": {
+   "default": "2",
+   "source": "report"
+  },
+  "OUTPUT": {
+   "default": "2",
+   "source": "report"
+  },
+  "OUTPUT_ME_ONLY_VARIATIONS": {
+   "default": "1",
+   "source": "report"
+  },
+  "OVERWEIGHT_THRESHOLD": {
+   "default": "1e+12",
+   "source": "report"
+  },
+  "PARTICLE_CONTAINERS": {
+   "default": "",
+   "source": "manual"
+  },
+  "PARTICLE_DATA:*:Active": {
+   "default": "1",
+   "source": "report"
+  },
+  "PARTICLE_DATA:*:IntCharge": {
+   "default": "0",
+   "source": "report"
+  },
+  "PARTICLE_DATA:*:Mass": {
+   "default": "1.3",
+   "source": "report"
+  },
+  "PARTICLE_DATA:*:Massive": {
+   "default": "1",
+   "source": "report"
+  },
+  "PARTICLE_DATA:*:Priority": {
+   "default": "0",
+   "source": "report"
+  },
+  "PARTICLE_DATA:*:Stable": {
+   "default": "0",
+   "source": "report"
+  },
+  "PARTICLE_DATA:*:StrongCharge": {
+   "default": "0",
+   "source": "report"
+  },
+  "PARTICLE_DATA:*:Width": {
+   "default": "0.4",
+   "source": "report"
+  },
+  "PARTICLE_DATA:*:Yukawa": {
+   "default": "-1",
+   "source": "report"
+  },
+  "PB_USE_FMM": {
+   "default": "0",
+   "source": "report"
+  },
+  "PDF_LIBRARY": {
+   "default": "",
+   "source": "report"
+  },
+  "PDF_SET": {
+   "default": "",
+   "source": "report"
+  },
+  "PDF_SET_VERSIONS": {
+   "default": "",
+   "source": "report"
+  },
+  "PDF_VARIATIONS": {
+   "default": "",
+   "source": "manual"
+  },
+  "PRETTY_PRINT": {
+   "default": "On",
+   "source": "report"
+  },
+  "PRINT_PS_POINTS": {
+   "default": "0",
+   "source": "report"
+  },
+  "PRINT_VERSION_INFO": {
+   "default": "0",
+   "source": "report"
+  },
+  "PROCESSES:*:Amplitude_Order": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Associated_Contributions": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:CKKW": {
+   "default": "",
+   "source": "report"
+  },
+  "PROCESSES:*:Couplings": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Cut_Core": {
+   "default": "0",
+   "source": "report"
+  },
+  "PROCESSES:*:Decay": {
+   "default": "",
+   "source": "report"
+  },
+  "PROCESSES:*:DecayOS": {
+   "default": "",
+   "source": "report"
+  },
+  "PROCESSES:*:Enhance_Factor": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Enhance_Function": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Enhance_Observable": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Integration_Error": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Integrator": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Loop_Generator": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:ME_Generator": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Max_Epsilon": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Max_N_Quarks": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Max_N_TChannels": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Max_Order": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Min_N_Quarks": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Min_N_TChannels": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Min_Order": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:NLO_Mode": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:NLO_Order": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Name_Suffix": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:No_Decay": {
+   "default": "",
+   "source": "report"
+  },
+  "PROCESSES:*:Order:EW": {
+   "default": "-1",
+   "source": "report"
+  },
+  "PROCESSES:*:Order:QCD": {
+   "default": "-1",
+   "source": "report"
+  },
+  "PROCESSES:*:PSI_ItMin": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Print_Graphs": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:RS_Integrator": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:RS_ME_Generator": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:RS_PSI_ItMin": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Scales": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Sort_Flavors": {
+   "default": "3",
+   "source": "report"
+  },
+  "PROCESSES:*:Special": {
+   "default": "",
+   "source": "manual"
+  },
+  "PROCESSES:*:Subdivide_Virtual": {
+   "default": "",
+   "source": "manual"
+  },
+  "PSI:ITMAX": {
+   "default": "5000000",
+   "source": "report"
+  },
+  "PSI:ITMIN": {
+   "default": "5000",
+   "source": "report"
+  },
+  "PSI:MAXOPT": {
+   "default": "1",
+   "source": "report"
+  },
+  "PSI:NOPT": {
+   "default": "10",
+   "source": "report"
+  },
+  "PSI:NPOWER": {
+   "default": "0.5",
+   "source": "report"
+  },
+  "PSI:NRAWMAX": {
+   "default": "18446744073709551615",
+   "source": "report"
+  },
+  "PSI:STOPOPT": {
+   "default": "0",
+   "source": "report"
+  },
+  "PSI:TIMESTEP_OFFSET": {
+   "default": "0",
+   "source": "report"
+  },
+  "PSI:TIMESTEP_SLOPE": {
+   "default": "0",
+   "source": "report"
+  },
+  "PS_PT_FILE": {
+   "default": "",
+   "source": "report"
+  },
+  "Q2_AS": {
+   "default": "1",
+   "source": "report"
+  },
+  "QCUT_VARIATIONS": {
+   "default": "",
+   "source": "manual"
+  },
+  "RANDOM_SEED": {
+   "default": "-1, -1, -1, -1",
+   "source": "report"
+  },
+  "RANDOM_SEED1": {
+   "default": "-1",
+   "source": "report"
+  },
+  "RANDOM_SEED2": {
+   "default": "-1",
+   "source": "report"
+  },
+  "RANDOM_SEED3": {
+   "default": "-1",
+   "source": "report"
+  },
+  "RANDOM_SEED4": {
+   "default": "-1",
+   "source": "report"
+  },
+  "RELIC_DENSITY_EMAX": {
+   "default": "1000000",
+   "source": "report"
+  },
+  "REMNANTS:BEAM_DECORRELATOR": {
+   "default": "0",
+   "source": "report"
+  },
+  "RENORMALIZATION_SCALE_FACTOR": {
+   "default": "1",
+   "source": "report"
+  },
+  "RESPECT_MASSIVE_FLAG": {
+   "default": "0",
+   "source": "report"
+  },
+  "RESULT_DIRECTORY": {
+   "default": "Results",
+   "source": "report"
+  },
+  "RESUMMATION_SCALE_FACTOR": {
+   "default": "1",
+   "source": "report"
+  },
+  "REWEIGHT_SPLITTING_ALPHAS_SCALES": {
+   "default": "1",
+   "source": "report"
+  },
+  "REWEIGHT_SPLITTING_PDF_SCALES": {
+   "default": "1",
+   "source": "report"
+  },
+  "RIVET": {
+   "default": "",
+   "source": "manual"
+  },
+  "RLIMIT_AS": {
+   "default": "3254321152",
+   "source": "report"
+  },
+  "RLIMIT_BY_CPU": {
+   "default": "0",
+   "source": "report"
+  },
+  "RUNDATA": {
+   "default": "Sherpa.yaml",
+   "source": "report"
+  },
+  "RUN_MASS_BELOW_POLE": {
+   "default": "0",
+   "source": "report"
+  },
+  "SAVE_STATUS": {
+   "default": "",
+   "source": "report"
+  },
+  "SCALES": {
+   "default": "METS{MU_F2}{MU_R2}{MU_Q2}",
+   "source": "report"
+  },
+  "SCALE_FACTOR": {
+   "default": "1",
+   "source": "report"
+  },
+  "SCALE_VARIATIONS:*": {
+   "default": "",
+   "source": "report"
+  },
+  "SELECTION_WEIGHT_MODE": {
+   "default": "0",
+   "source": "report"
+  },
+  "SELECTORS:*": {
+   "default": "",
+   "source": "report"
+  },
+  "SHERPA_CPP_PATH": {
+   "default": "",
+   "source": "report"
+  },
+  "SHERPA_LDADD": {
+   "default": "",
+   "source": "report"
+  },
+  "SHERPA_LIB_PATH": {
+   "default": "",
+   "source": "report"
+  },
+  "SHERPA_VERSION": {
+   "default": "",
+   "source": "report"
+  },
+  "SHOWER:CKFMODE": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:ENHANCE": {
+   "default": "",
+   "source": "report"
+  },
+  "SHOWER:EVOLUTION_SCHEME": {
+   "default": "3030",
+   "source": "report"
+  },
+  "SHOWER:EW_MODE": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOWER:FORCED_IS_QUARK_SPLITTING": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:FORCED_SPLITTING_GLUON_SCALING": {
+   "default": "1.5",
+   "source": "report"
+  },
+  "SHOWER:FS_AS_FAC": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:FS_PT2MIN": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:IS_AS_FAC": {
+   "default": "0.25",
+   "source": "report"
+  },
+  "SHOWER:IS_PT2MIN": {
+   "default": "2",
+   "source": "report"
+  },
+  "SHOWER:JET_CRITERION": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:KFACTOR_SCHEME": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:KIN_SCHEME": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:KMODE": {
+   "default": "2",
+   "source": "report"
+  },
+  "SHOWER:MASS_THRESHOLD": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOWER:MAXEM": {
+   "default": "18446744073709551615",
+   "source": "report"
+  },
+  "SHOWER:MAXPART": {
+   "default": "2147483647",
+   "source": "report"
+  },
+  "SHOWER:MAX_REWEIGHT_FACTOR": {
+   "default": "1000",
+   "source": "report"
+  },
+  "SHOWER:MI_FS_AS_FAC": {
+   "default": "0.66",
+   "source": "report"
+  },
+  "SHOWER:MI_FS_PT2MIN": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:MI_IS_AS_FAC": {
+   "default": "0.66",
+   "source": "report"
+  },
+  "SHOWER:MI_IS_PT2MIN": {
+   "default": "4",
+   "source": "report"
+  },
+  "SHOWER:MI_KFACTOR_SCHEME": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOWER:MI_KIN_SCHEME": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:MI_PT2MIN_GSPLIT_FACTOR": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:PDFCHECK": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:PDF_FAC": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:PDF_MIN": {
+   "default": "0.0001",
+   "source": "report"
+  },
+  "SHOWER:PDF_MIN_X": {
+   "default": "0.01",
+   "source": "report"
+  },
+  "SHOWER:PT2MIN_GSPLIT_FACTOR": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:QCD_MODE": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:RECO_CHECK": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOWER:RECO_DECAYS": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOWER:RESPECT_Q2": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOWER:REWEIGHT": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:REWEIGHT_SCALE_CUTOFF": {
+   "default": "5",
+   "source": "report"
+  },
+  "SHOWER:SCALE_FACTOR": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER:SCALE_SCHEME": {
+   "default": "14",
+   "source": "report"
+  },
+  "SHOWER:SCALE_VARIATION_SCHEME": {
+   "default": "1",
+   "source": "report"
+  },
+  "SHOWER_GENERATOR": {
+   "default": "CSS",
+   "source": "report"
+  },
+  "SHOW_ANALYSIS_SYNTAX": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOW_FILTER_SYNTAX": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOW_KFACTOR_SYNTAX": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOW_ME_GENERATORS": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOW_MODEL_SYNTAX": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOW_NLOMC_GENERATORS": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOW_NTRIALS": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOW_PDF_SETS": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOW_PS_GENERATORS": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOW_SCALE_SYNTAX": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOW_SELECTOR_SYNTAX": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOW_SHOWER_GENERATORS": {
+   "default": "0",
+   "source": "report"
+  },
+  "SHOW_VARIABLE_SYNTAX": {
+   "default": "0",
+   "source": "report"
+  },
+  "SIN2THETAW": {
+   "default": "",
+   "source": "manual"
+  },
+  "SOFT_COLLISIONS": {
+   "default": "None",
+   "source": "report"
+  },
+  "SP:ADD_DOC": {
+   "default": "0",
+   "source": "report"
+  },
+  "SP:SET_COLORS": {
+   "default": "0",
+   "source": "report"
+  },
+  "SPECIAL_TAU_SPIN_CORRELATIONS": {
+   "default": "0",
+   "source": "report"
+  },
+  "STATUS_PATH": {
+   "default": "",
+   "source": "report"
+  },
+  "TAGS": {
+   "default": "",
+   "source": "manual"
+  },
+  "THRESHOLD_ALPHAS": {
+   "default": "1",
+   "source": "report"
+  },
+  "TIMEOUT": {
+   "default": "-1",
+   "source": "report"
+  },
+  "UFO_PARAM_CARD": {
+   "default": "",
+   "source": "manual"
+  },
+  "USERHOOKS": {
+   "default": "None",
+   "source": "report"
+  },
+  "USE_PDF_ALPHAS": {
+   "default": "",
+   "source": "manual"
+  },
+  "USR_WGT_MODE": {
+   "default": "1",
+   "source": "report"
+  },
+  "VARIATIONS_INCLUDE_CV": {
+   "default": "0",
+   "source": "report"
+  },
+  "VEGAS_MODE": {
+   "default": "2",
+   "source": "report"
+  },
+  "VEV": {
+   "default": "",
+   "source": "manual"
+  },
+  "VIRTUAL_EVALUATION_FRACTION": {
+   "default": "1",
+   "source": "report"
+  },
+  "WIDTH_SCHEME": {
+   "default": "CMS",
+   "source": "report"
+  },
+  "YFS:1/ALPHAQED": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:1/ALPHAQED(0)": {
+   "default": "137.03599976",
+   "source": "report"
+  },
+  "YFS:BETA": {
+   "default": "2",
+   "source": "report"
+  },
+  "YFS:CEEX": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:CHECK_FIRST": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:CHECK_MASS_REG": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:CHECK_POLES": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:CHECK_REAL": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:CHECK_VIRT_BORN": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:CLUSTERING_THRESHOLD": {
+   "default": "10",
+   "source": "report"
+  },
+  "YFS:COULOMB": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:Check_Real_Sub": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:Collinear_Real": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:DEBUG_DIR_FSR": {
+   "default": "FSR_DEBUG",
+   "source": "report"
+  },
+  "YFS:DEBUG_DIR_ISR": {
+   "default": "ISR_DEBUG",
+   "source": "report"
+  },
+  "YFS:DEBUG_DIR_NLO": {
+   "default": "YFS_NLO_Hist",
+   "source": "report"
+  },
+  "YFS:DELTA": {
+   "default": "0.01",
+   "source": "report"
+  },
+  "YFS:DIPOLE_FLAV": {
+   "default": "",
+   "source": "report"
+  },
+  "YFS:DIPOLE_N": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:DRCUT": {
+   "default": "1.79769313486e+308",
+   "source": "report"
+  },
+  "YFS:FF_RECOIL_SCHEME": {
+   "default": "2",
+   "source": "report"
+  },
+  "YFS:FILL_BLOB": {
+   "default": "1",
+   "source": "report"
+  },
+  "YFS:FI_RECOIL_SCHEME": {
+   "default": "2",
+   "source": "report"
+  },
+  "YFS:FSR_CRU": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:FSR_CUT": {
+   "default": "1.09649122807e-08",
+   "source": "report"
+  },
+  "YFS:FSR_DEBUG": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:FSR_EIK": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:FSR_EMIN": {
+   "default": "1.09649122807e-08",
+   "source": "report"
+  },
+  "YFS:FSR_FCUT": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:FSR_NBAR": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:FSR_NGAMMA": {
+   "default": "-1",
+   "source": "report"
+  },
+  "YFS:FULL_FORM": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:Flux_Mode": {
+   "default": "1",
+   "source": "report"
+  },
+  "YFS:HARD_MIN": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:HIDE_PHOTONS": {
+   "default": "1",
+   "source": "report"
+  },
+  "YFS:IFI_Sub": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:INCREASE_MAXIMUM_WEIGHT": {
+   "default": "1",
+   "source": "report"
+  },
+  "YFS:IR_CUTOFF": {
+   "default": "0.001",
+   "source": "report"
+  },
+  "YFS:IR_CUTOFF_FRAME": {
+   "default": "Multipole_CMS",
+   "source": "report"
+  },
+  "YFS:ISR_DEBUG": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:Integrate_NLO": {
+   "default": "1",
+   "source": "report"
+  },
+  "YFS:KKMC_ANG": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:LOOP_TOOL": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:MASSIVE_NBAR": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:MAXEM": {
+   "default": "2147483647",
+   "source": "report"
+  },
+  "YFS:MINEM": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:MODE": {
+   "default": "Full",
+   "source": "report"
+  },
+  "YFS:Massless_Sub": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:No_Born": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:No_Flux": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:No_Sub": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:PHOTON_MASS": {
+   "default": "0.1",
+   "source": "report"
+  },
+  "YFS:PHOTON_SPLITTER_ENHANCE_FACTOR": {
+   "default": "1",
+   "source": "report"
+  },
+  "YFS:PHOTON_SPLITTER_MAX_HADMASS": {
+   "default": "0.5",
+   "source": "report"
+  },
+  "YFS:PHOTON_SPLITTER_MODE": {
+   "default": "15",
+   "source": "report"
+  },
+  "YFS:PHOTON_SPLITTER_ORDERING_SCHEME": {
+   "default": "2",
+   "source": "report"
+  },
+  "YFS:PHOTON_SPLITTER_SPECTATOR_SCHEME": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:PHOTON_SPLITTER_STARTING_SCALE_SCHEME": {
+   "default": "1",
+   "source": "report"
+  },
+  "YFS:REAL_ONLY": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:REDUCE_MAXIMUM_ENERGY": {
+   "default": "1",
+   "source": "report"
+  },
+  "YFS:STRICTNESS": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:Sub_Mode": {
+   "default": "2",
+   "source": "report"
+  },
+  "YFS:TChannel": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:USE_ME": {
+   "default": "1",
+   "source": "report"
+  },
+  "YFS:USE_MODEL_ALPHA": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:USE_RUNNING_PARAMETERS": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:UV_CUTOFF": {
+   "default": "1.79769313486e+308",
+   "source": "report"
+  },
+  "YFS:VIRTUAL_ONLY": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:VMAX": {
+   "default": "0",
+   "source": "report"
+  },
+  "YFS:WEIGHT_MODE": {
+   "default": "Full",
+   "source": "report"
+  },
+  "YFS:WW_BETAT": {
+   "default": "0.382",
+   "source": "report"
+  },
+  "YFS:WW_FORM": {
+   "default": "0",
+   "source": "report"
+  },
+  "YUKAWA_MASSES": {
+   "default": "Running",
+   "source": "report"
+  }
+ },
+ "sherpa_version": "3.0.3",
+ "source": "Settings_Report of four Sherpa 3.0.3 runs (e+e- -> jets with and without scale variations, pp -> e+e-, pp -> t tbar with hard decays), with the keys of the PROCESSES block and the top-level keys the Sherpa 3 manual documents that those runs did not read; the selector, generator, scale-setter and K-factor names are what Sherpa 3.0.3 prints for SHOW_SELECTOR_SYNTAX, SHOW_ME_GENERATORS, SHOW_SHOWER_GENERATORS, SHOW_NLOMC_GENERATORS, SHOW_PS_GENERATORS, SHOW_SCALE_SYNTAX and SHOW_KFACTOR_SYNTAX"
+}

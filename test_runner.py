@@ -323,7 +323,7 @@ def main():
     )
     parser.add_argument(
         "--only",
-        choices=["prereqs", "conversions", "kinematics", "reconstruction", "delta_r_filter", "feynrules", "frgen", "validate", "jobs", "reverse", "mg5", "pythia", "sherpa", "llm", "pdg", "inspire", "arxiv", "units", "nda", "wolfram", "eda", "feyngraph", "llp", "logging"],
+        choices=["prereqs", "conversions", "kinematics", "reconstruction", "delta_r_filter", "feynrules", "frgen", "validate", "jobs", "reverse", "mg5", "event_io", "events", "delphes", "rivet", "pythia", "sherpa", "cpp", "generators", "llm", "pdg", "inspire", "hepdata", "arxiv", "units", "nda", "wolfram", "eda", "feyngraph", "llp", "logging"],
         help="Run only tests for specified component (prereqs = prerequisites check only)"
     )
     parser.add_argument(
@@ -397,13 +397,44 @@ def main():
             "script": REPO_ROOT / "tools" / "mg5" / "test_mg5.py",
             "description": "MadGraph tools (card editing, event generation, LHE conversion)"
         },
+        "events": {
+            "script": REPO_ROOT / "tools" / "events" / "test_convert.py",
+            "description": "Event dataset conversion (ROOT, HepMC3, JSONL; HepMC3 from generation)"
+        },
+        "delphes": {
+            "script": REPO_ROOT / "tools" / "delphes" / "test_delphes.py",
+            "description": "Delphes fast simulation (the real-binary chain runs when DELPHES_DIR is set)"
+        },
+        "rivet": {
+            "script": REPO_ROOT / "tools" / "rivet" / "test_rivet.py",
+            "description": "Rivet tools (analysis catalogue, run checks, comparison statistics, plots; the real chain runs when RIVET_PATH is set)"
+        },
+        "event_io": {
+            "script": REPO_ROOT / "tools" / "tests" / "test_event_io.py",
+            "description": "Event dataset IO (ROOT/JSONL round-trip, store specs, chunked writing)"
+        },
         "pythia": {
-            "script": REPO_ROOT / "tools" / "pythia" / "test_pythia.py",
-            "description": "Pythia tools (card editing, event generation, jet clustering)"
+            "scripts": [
+                REPO_ROOT / "tools" / "pythia" / "test_pythia.py",
+                REPO_ROOT / "tools" / "pythia" / "test_validate.py",
+                REPO_ROOT / "tools" / "pythia" / "test_generation.py",
+                REPO_ROOT / "tools" / "pythia" / "test_datasets.py",
+            ],
+            "description": "Pythia tools (card editing, event generation, jet clustering, settings database, run-card validation)"
         },
         "sherpa": {
             "script": REPO_ROOT / "tools" / "sherpa" / "test_sherpa.py",
-            "description": "Sherpa tools (card editing, event generation)"
+            "description": "Sherpa tools (card grammar, validator, record conversion, datasets; the real chain runs when sherpa-mc is importable)",
+            "use_pytest": True,
+        },
+        "generators": {
+            "script": REPO_ROOT / "tools" / "tests" / "test_generator_comparison.py",
+            "description": "Pythia and Sherpa on one process through the shared tools (runs when both wheels are importable)",
+            "use_pytest": True,
+        },
+        "cpp": {
+            "script": REPO_ROOT / "tools" / "cpp" / "test_cpp.py",
+            "description": "Local Pythia 8 / Sherpa installs (wheel markers, C++ drivers, program tools)"
         },
         "pdg": {
             "script": REPO_ROOT / "tools" / "pdg" / "tests" / "test_pdg_tool.py",
@@ -412,6 +443,11 @@ def main():
         "inspire": {
             "script": REPO_ROOT / "tools" / "inspire" / "tests" / "test_inspire_tools.py",
             "description": "INSPIRE tools (paper search, citations, author information)"
+        },
+        "hepdata": {
+            "script": REPO_ROOT / "tools" / "hepdata" / "tests" / "test_hepdata_tools.py",
+            "description": "HEPData tools (record search, versioned tables, provenance)",
+            "use_pytest": True,
         },
         # `literature` was already an --only choice but had no suite behind it,
         # so it ran zero tests and reported success.

@@ -12,6 +12,10 @@ automatic Feynman diagram enumeration.
 
 from typing import List, Optional, Any, Dict
 import os
+from pathlib import Path
+import hashlib
+import json
+import importlib.metadata
 
 try:
     from .model_mapping import nda_to_feyngraph_label, feyngraph_to_nda_label
@@ -31,6 +35,7 @@ def _require_feyngraph() -> Any:
     """
     try:
         import feyngraph
+
         return feyngraph
     except ImportError as e:
         raise ImportError(
@@ -57,7 +62,7 @@ class FeynGraphInterface:
         feyngraph: FeynGraph module (lazily loaded)
     """
 
-    def __init__(self, model: str = "SM"):
+    def __init__(self, model: str = "SM", base_directory: Optional[str] = None):
         """
         Initialize FeynGraph interface.
 
@@ -71,6 +76,7 @@ class FeynGraphInterface:
             ValueError: If model file not found
         """
         self.model = model
+        self.base_directory = Path(base_directory or os.getcwd()).resolve()
         self.feyngraph = None  # Lazy loading
         self._model_obj = None
 
@@ -78,6 +84,7 @@ class FeynGraphInterface:
         """Lazy load FeynGraph module."""
         if self.feyngraph is None:
             self.feyngraph = _require_feyngraph()
+        if self._model_obj is None:
             self._load_model()
 
     def _load_model(self):
@@ -90,32 +97,101 @@ class FeynGraphInterface:
         if self.model == "SM":
             # Standard Model is built-in to FeynGraph
             # No explicit loading needed
-            self._model_obj = "SM"
+            self._model_obj = self.feyngraph.Model()
         else:
-            # Path to UFO model
-            if not os.path.exists(self.model):
-                raise ValueError(
-                    f"UFO model directory not found: {self.model}\n"
-                    f"Specify 'SM' for Standard Model or provide valid path to UFO directory."
-                )
+            path = Path(self.model)
+            if not path.is_absolute():
+                path = self.base_directory / path
+            path = path.resolve()
+            if not path.is_dir() or not (path / "particles.py").is_file():
+                raise ValueError(f"Not a UFO directory: {path}")
+            # Explicitly bind the supplied UFO. Never fall back to the built-in SM.
+            self.model = str(path)
+            self._model_obj = self.feyngraph.Model.from_ufo(str(path))
 
-            if not os.path.isdir(self.model):
-                raise ValueError(
-                    f"Model path must be a directory: {self.model}\n"
-                    f"UFO models are directories containing particles.py, vertices.py, etc."
-                )
+    def resolve_label(self, label: str) -> str:
+        """Prefer native labels (including BSM), then model-aware SM aliases."""
+        self._ensure_loaded()
+        names = {p.name() for p in self._model_obj.particles()}
+        if label in names:
+            return label
+        aliases = {"tau": "ta-", "tau-": "ta-", "tau+": "ta+", "taubar": "ta+"}
+        candidate = aliases.get(label)
+        if candidate in names:
+            return candidate
+        try:
+            candidate = nda_to_feyngraph_label(label)
+        except ValueError:
+            candidate = None
+        if candidate in names:
+            return candidate
+        raise ValueError(
+            f"Unknown particle {label!r} in the selected model; inspect its particle labels"
+        )
 
-            # Load UFO model (FeynGraph API will handle this)
-            # Note: Actual FeynGraph API might differ, this is a placeholder
-            # TODO: Update when FeynGraph UFO loading API is confirmed
-            self._model_obj = self.model
+    def model_info(self) -> Dict[str, Any]:
+        self._ensure_loaded()
+        particles = sorted(
+            [
+                {
+                    "name": p.name(),
+                    "antiname": p.anti_name(),
+                    "pdg": p.pdg(),
+                    "spin": p.spin(),
+                    "color": p.color(),
+                }
+                for p in self._model_obj.particles()
+            ],
+            key=lambda p: p["pdg"],
+        )
+        vertices = sorted(
+            [
+                {"name": v.name(), "orders": v.coupling_orders()}
+                for v in self._model_obj.vertices()
+            ],
+            key=lambda v: v["name"],
+        )
+        info = {
+            "source": "builtin" if self.model == "SM" else "ufo",
+            "model": self.model,
+            "feyngraph_version": importlib.metadata.version("feyngraph"),
+            "particles": particles,
+            "vertices": vertices,
+        }
+        if self.model == "SM":
+            info["restrictions"] = (
+                "FeynGraph built-in SM; not assumed equivalent to an unrestricted SM UFO"
+            )
+            info["fingerprint_scope"] = (
+                "FeynGraph version and exposed structural inventory; not numerical parameters"
+            )
+            identity = {k: v for k, v in info.items() if k != "model"}
+        else:
+            root = Path(self.model)
+            if any(p.is_symlink() for p in root.rglob("*")):
+                raise ValueError(
+                    "UFO symlinks are not supported; supply a self-contained model"
+                )
+            info["files"] = [
+                {
+                    "path": p.relative_to(root).as_posix(),
+                    "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+                }
+                for p in sorted(root.rglob("*.py"))
+                if p.is_file()
+            ]
+            identity = info["files"]
+        info["model_sha256"] = hashlib.sha256(
+            json.dumps(identity, sort_keys=True).encode()
+        ).hexdigest()
+        return info
 
     def enumerate_diagrams(
         self,
         initial_particles: List[str],
         final_particles: List[str],
         max_loop_order: int = 0,
-        **kwargs
+        **kwargs,
     ) -> List[Any]:
         """
         Generate all Feynman diagrams for the specified process.
@@ -149,8 +225,8 @@ class FeynGraphInterface:
 
         # Map HEPTAPOD labels to FeynGraph notation
         try:
-            fg_initial = [nda_to_feyngraph_label(p) for p in initial_particles]
-            fg_final = [nda_to_feyngraph_label(p) for p in final_particles]
+            fg_initial = [self.resolve_label(p) for p in initial_particles]
+            fg_final = [self.resolve_label(p) for p in final_particles]
         except ValueError as e:
             raise ValueError(
                 f"Invalid particle label in diagram specification: {e}\n"
@@ -162,10 +238,7 @@ class FeynGraphInterface:
         try:
             # Generate diagrams using FeynGraph
             diagram_container = self.feyngraph.generate_diagrams(
-                fg_initial,
-                fg_final,
-                max_loop_order,
-                **kwargs
+                fg_initial, fg_final, max_loop_order, model=self._model_obj, **kwargs
             )
 
             # Convert DiagramContainer to list
@@ -218,16 +291,13 @@ class FeynGraphInterface:
 
             # Get particle names (convert to HEPTAPOD notation)
             initial_particles = [
-                feyngraph_to_nda_label(leg.particle().name())
-                for leg in incoming
+                feyngraph_to_nda_label(leg.particle().name()) for leg in incoming
             ]
             final_particles = [
-                feyngraph_to_nda_label(leg.particle().name())
-                for leg in outgoing
+                feyngraph_to_nda_label(leg.particle().name()) for leg in outgoing
             ]
             propagator_particles = [
-                feyngraph_to_nda_label(prop.particle().name())
-                for prop in propagators
+                feyngraph_to_nda_label(prop.particle().name()) for prop in propagators
             ]
 
             return {
@@ -240,8 +310,8 @@ class FeynGraphInterface:
                 "particles": {
                     "initial": initial_particles,
                     "final": final_particles,
-                    "propagators": propagator_particles
-                }
+                    "propagators": propagator_particles,
+                },
             }
 
         except Exception as e:
@@ -250,9 +320,7 @@ class FeynGraphInterface:
 
 # Convenience function for quick enumeration
 def enumerate_sm_diagrams(
-    initial: List[str],
-    final: List[str],
-    max_loops: int = 0
+    initial: List[str], final: List[str], max_loops: int = 0
 ) -> List[Any]:
     """
     Quick enumeration of Standard Model diagrams.

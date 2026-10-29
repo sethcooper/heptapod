@@ -7,7 +7,8 @@
 """
 Delphes fast detector simulation, closing heptapod's chain:
 
-    ... -> evtjsonl -> JSONLToHepMCTool -> .hepmc
+    PythiaFromRunCardTool(output_format="hepmc3") -> .hepmc
+    (or any event dataset -> ConvertEventsTool -> .hepmc)
         -> DelphesFromHepMCTool -> .root
         -> DelphesROOTToJSONLTool -> reco-level JSONL
 
@@ -97,8 +98,8 @@ class DelphesFromHepMCTool(_SandboxedTool):
     Run Delphes fast detector simulation on a HepMC3 event file.
 
     Input (runtime):
-      - hepmc_path: input .hepmc file (use JSONLToHepMCTool to produce
-        one from evtjsonl events). HepMC only — feeding Delphes
+      - hepmc_path: input .hepmc file, from PythiaFromRunCardTool with
+        output_format="hepmc3" or from ConvertEventsTool. HepMC only — feeding Delphes
         parton-level LHE would silently skip showering/hadronization,
         so that path is deliberately not offered.
       - output_root: output ROOT file path (default "delphes/delphes.root")
@@ -174,7 +175,8 @@ class DelphesFromHepMCTool(_SandboxedTool):
         if not os.path.exists(src):
             return self.format_error(error="File Not Found",
                                      reason="HepMC input not found", context=self.hepmc_path,
-                                     suggestion="Produce one with JSONLToHepMCTool")
+                                     suggestion="Produce one with PythiaFromRunCardTool "
+                                                "(output_format='hepmc3') or ConvertEventsTool")
         if os.path.exists(dst):
             if not self.overwrite:
                 return self.format_error(
@@ -228,7 +230,8 @@ class DelphesFromHepMCTool(_SandboxedTool):
                 fix = ("A nonzero exit is usually the detector card (missing or "
                        "invalid TCL card) or the HepMC input (not a valid HepMC3 "
                        "ASCII file, or empty). Confirm the card resolves and the "
-                       "HepMC was produced by JSONLToHepMCTool.")
+                       "HepMC was produced by ConvertEventsTool or "
+                       "PythiaFromRunCardTool.")
             else:
                 reason = "DelphesHepMC3 exited 0 but produced no ROOT output"
                 fix = ("Delphes ran but wrote no ROOT file — almost always an "

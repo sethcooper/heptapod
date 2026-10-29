@@ -19,11 +19,62 @@ from orchestral.tools.base.field_utils import RuntimeField, StateField
 
 from .pdg_interface import PDGInterface
 from .particle_aliases import resolve_alias, get_resolution_info
+from ..provenance import attach, pdg_source_id, record_call
 
 SCHEMA_VERSION = "pdg-database-1.0"
 
 
-class PDGDatabaseTool(BaseTool):
+def _pdgids(obj, out):
+    """Every ``pdgid`` value in a result, in order of appearance."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == "pdgid" and isinstance(v, str) and v:
+                out.append(v)
+            elif isinstance(v, (dict, list)):
+                _pdgids(v, out)
+    elif isinstance(obj, list):
+        for v in obj:
+            _pdgids(v, out)
+    return out
+
+
+class _PDGProvenance:
+    """Wraps each PDG tool's ``_execute`` so its JSON result carries a
+    ``provenance`` block (``PDG:<pdgid>/<edition>`` source ids, the pdg
+    package version and Review edition) and the call is logged under
+    research/. The PDG API reads a local SQLite file, so there is no
+    request URL and nothing is cached by the tool itself."""
+
+    def _run(self) -> str:
+        out = self._execute()
+        try:
+            edition = str(getattr(self._interface.api, "edition", "")) or None
+        except Exception:
+            edition = None
+        try:
+            import pdg
+            version = getattr(pdg, "__version__", None)
+        except Exception:
+            version = None
+        try:
+            parsed = json.loads(out)
+            ids = _pdgids(parsed, []) if parsed.get("status") == "ok" else []
+        except (ValueError, AttributeError):
+            ids = []
+        request = {k: getattr(self, k) for k in type(self).model_fields
+                   if k not in BaseTool.model_fields and k != "base_directory"}
+        prov = record_call(
+            self.base_directory,
+            type(self).__name__.removesuffix("Tool"),
+            request,
+            out,
+            api={"name": "pdg", "version": f"{version} (Review {edition})" if version else edition},
+            source_ids=[pdg_source_id(i, edition) for i in ids],
+        )
+        return attach(out, prov)
+
+
+class PDGDatabaseTool(_PDGProvenance, BaseTool):
     """
     Query the Particle Data Group database for particle properties.
 
@@ -80,7 +131,7 @@ class PDGDatabaseTool(BaseTool):
         self.base_directory = os.path.abspath(self.base_directory)
         self._interface = PDGInterface()
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         """
         Query PDG database and return JSON result.
 
@@ -178,7 +229,7 @@ class PDGDatabaseTool(BaseTool):
         return result
 
 
-class PDGSearchTool(BaseTool):
+class PDGSearchTool(_PDGProvenance, BaseTool):
     """
     Search the PDG database for particles matching a query.
 
@@ -211,7 +262,7 @@ class PDGSearchTool(BaseTool):
         self.base_directory = os.path.abspath(self.base_directory)
         self._interface = PDGInterface()
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         """Search PDG database."""
         try:
             results = self._interface.search_particles(
@@ -233,7 +284,7 @@ class PDGSearchTool(BaseTool):
             }, indent=2)
 
 
-class PDGPropertyTool(BaseTool):
+class PDGPropertyTool(_PDGProvenance, BaseTool):
     """
     Query a specific PDG property by its PDGID.
 
@@ -263,7 +314,7 @@ class PDGPropertyTool(BaseTool):
         self.base_directory = os.path.abspath(self.base_directory)
         self._interface = PDGInterface()
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         """Query PDG property by ID."""
         try:
             result = self._interface.get_property_by_pdgid(self.pdgid)

@@ -1,576 +1,916 @@
-import os, sys
-from pathlib import Path
-import json
-import argparse
-import shutil
+"""
+# test_sherpa.py is a part of the HEPTAPOD package.
+# Copyright (C) 2026 HEPTAPOD authors (see AUTHORS for details).
+# HEPTAPOD is licensed under the GNU GPL v3 or later, see LICENSE for details.
+# Please respect the MCnet Guidelines, see GUIDELINES for details.
 
-SCRIPT_PATH = Path(__file__).resolve()
-SHERPA_DIR  = SCRIPT_PATH.parent                 # .../heptapod/tools/sherpa
-TOOLS_DIR   = SHERPA_DIR.parent                  # .../heptapod/tools
-REPO_ROOT   = TOOLS_DIR.parent                   # .../heptapod
+Tests of the Sherpa tools.
 
-# Add PATHs so imports work from anywhere
-sys.path.insert(0, str(SHERPA_DIR))
-sys.path.insert(0, str(REPO_ROOT))
-
-from sherpa import SherpaFromRunCardTool, _edit_sherpa_card
-from tools.analysis.conversions import EventJSONLToNumpyTool
-
-# Initialize base directory
-base_directory = str(SHERPA_DIR / "sherpa_tools_test_files")
-
-# Parse command-line arguments
-parser = argparse.ArgumentParser(
-    description="Run Sherpa tools test suite",
-    formatter_class=argparse.RawDescriptionHelpFormatter
-)
-parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
-parser.add_argument(
-    "--keep-files",
-    action="store_true",
-    help="Keep test-generated files after tests complete (useful for debugging)"
-)
-args = parser.parse_args()
-
-
-def test_path_traversal_prevention():
-    """Test that path traversal attempts are rejected (critical security test)."""
-    print(">> Testing path traversal prevention (security)...\n")
-
-    # Test 1: cmnd_path with path traversal
-    tool = SherpaFromRunCardTool(
-        base_directory=base_directory,
-        data_dir="data/",
-        cmnd_path="../../../etc/passwd",
-        n_events=100,
-        seed=12345,
-        finals_only=True,
-        full_history=False
-    )
-    tool._setup()
-    result = tool._run()
-    # Should fail due to file not found (path escapes sandbox)
-    try:
-        result_json = json.loads(result)
-        assert result_json.get("status") != "ok", "Expected failure for path traversal"
-    except json.JSONDecodeError:
-        # format_error() returns plain text
-        assert ("error" in result.lower() or "not found" in result.lower() or
-                "denied" in result.lower() or "escape" in result.lower())
-    print("[✓] Test 1 passed: cmnd_path traversal rejected")
-
-    # Test 2: data_dir with path traversal
-    tool = SherpaFromRunCardTool(
-        base_directory=base_directory,
-        data_dir="../../../tmp/",
-        cmnd_path="cards/pp_ttbar.cmnd",
-        n_events=100,
-        seed=12345,
-        finals_only=True,
-        full_history=False
-    )
-    tool._setup()
-    result = tool._run()
-    # Tool should handle this - either reject or sandbox it
-    # We just verify it doesn't crash
-    print("[✓] Test 2 passed: data_dir traversal handled")
-
-    # Test 3: Absolute path in cmnd_path (should be rejected/handled)
-    tool = SherpaFromRunCardTool(
-        base_directory=base_directory,
-        data_dir="data/",
-        cmnd_path="/etc/passwd",
-        n_events=100,
-        seed=12345,
-        finals_only=True,
-        full_history=False
-    )
-    tool._setup()
-    result = tool._run()
-    try:
-        result_json = json.loads(result)
-        assert result_json.get("status") != "ok", "Expected failure for absolute path"
-    except json.JSONDecodeError:
-        assert ("error" in result.lower() or "not found" in result.lower())
-    print("[✓] Test 3 passed: Absolute path in cmnd_path rejected")
-
-    print("\nAll path traversal prevention tests passed! [✓]\n")
-
-
-def test_seed_reproducibility():
-    """Test that same seed produces identical events (scientific reproducibility)."""
-    print(">> Testing seed reproducibility...\n")
-
-    # Check if test card exists
-    card_path = base_directory + "/cards/pp_ttbar.yaml"
-    if not os.path.exists(card_path):
-        print(f"[⊘] Skipping seed reproducibility test: card not found at {card_path}\n")
-        return None
-
-    # Generate events with seed 42
-    tool_run1 = SherpaFromRunCardTool(
-        base_directory=base_directory,
-        data_dir="data_seed_test_1/",
-        cmnd_path=card_path,
-        n_events=100,  # Small number for speed
-        seed=42,
-        finals_only=True,
-        full_history=False
-    )
-    tool_run1._setup()
-    output1_raw = tool_run1._run()
-
-    try:
-        output1 = json.loads(output1_raw)
-    except (json.JSONDecodeError, ValueError):
-        print(f"[⊘] Skipping seed reproducibility test: Sherpa run 1 failed\n")
-        print(f"  {output1_raw}\n")
-        return None
-
-    if output1.get("status") != "ok":
-        print(f"[⊘] Skipping seed reproducibility test: Sherpa run 1 failed\n")
-        return None
-
-    # Generate events with same seed 42
-    tool_run2 = SherpaFromRunCardTool(
-        base_directory=base_directory,
-        data_dir="data_seed_test_2/",
-        cmnd_path=card_path,
-        n_events=100,
-        seed=42,
-        finals_only=True,
-        full_history=False
-    )
-    tool_run2._setup()
-    output2_raw = tool_run2._run()
-
-    try:
-        output2 = json.loads(output2_raw)
-    except (json.JSONDecodeError, ValueError):
-        print(f"[⊘] Skipping seed reproducibility test: Sherpa run 2 failed\n")
-        return None
-
-    if output2.get("status") != "ok":
-        print(f"[⊘] Skipping seed reproducibility test: Sherpa run 2 failed\n")
-        return None
-
-    # Load and compare first events
-    jsonl1_path = os.path.join(base_directory, "data_seed_test_1", "events.jsonl")
-    jsonl2_path = os.path.join(base_directory, "data_seed_test_2", "events.jsonl")
-
-    with open(jsonl1_path, "r") as f1, open(jsonl2_path, "r") as f2:
-        event1 = json.loads(f1.readline())
-        event2 = json.loads(f2.readline())
-
-        particles1 = event1["data"]["particles"]
-        particles2 = event2["data"]["particles"]
-
-        # Test 1: Same number of particles
-        assert len(particles1) == len(particles2), \
-            f"Particle count mismatch: {len(particles1)} vs {len(particles2)}"
-        print(f"[✓] Test 1 passed: Same particle count ({len(particles1)} particles)")
-
-        # Test 2: Same PDG IDs
-        pdg1 = [p["id"] for p in particles1]
-        pdg2 = [p["id"] for p in particles2]
-        assert pdg1 == pdg2, "PDG ID mismatch"
-        print("[✓] Test 2 passed: Identical PDG IDs")
-
-        # Test 3: Same momenta (within floating point tolerance)
-        for i, (p1, p2) in enumerate(zip(particles1, particles2)):
-            px_match = abs(p1["px"] - p2["px"]) < 1e-6
-            py_match = abs(p1["py"] - p2["py"]) < 1e-6
-            pz_match = abs(p1["pz"] - p2["pz"]) < 1e-6
-            e_match = abs(p1["E"] - p2["E"]) < 1e-6
-            assert px_match and py_match and pz_match and e_match, \
-                f"Momentum mismatch at particle {i}"
-        print("[✓] Test 3 passed: Identical momenta (within tolerance)")
-
-    # Test 4: Different seed produces different results
-    tool_run3 = SherpaFromRunCardTool(
-        base_directory=base_directory,
-        data_dir="data_seed_test_3/",
-        cmnd_path=card_path,
-        n_events=100,
-        seed=999,  # Different seed
-        finals_only=True,
-        full_history=False
-    )
-    tool_run3._setup()
-    output3_raw = tool_run3._run()
-
-    try:
-        output3 = json.loads(output3_raw)
-    except (json.JSONDecodeError, ValueError):
-        print(f"[⊘] Skipping different-seed test: Sherpa run 3 failed\n")
-        return {"status": "partial"}
-
-    if output3.get("status") == "ok":
-        jsonl3_path = os.path.join(base_directory, "data_seed_test_3", "events.jsonl")
-        with open(jsonl1_path, "r") as f1, open(jsonl3_path, "r") as f3:
-            event1 = json.loads(f1.readline())
-            event3 = json.loads(f3.readline())
-
-            particles1 = event1["data"]["particles"]
-            particles3 = event3["data"]["particles"]
-
-            # Should have different momenta (very unlikely to be identical by chance)
-            different = False
-            for p1, p3 in zip(particles1, particles3):
-                if abs(p1["px"] - p3["px"]) > 1e-6:
-                    different = True
-                    break
-
-            assert different, "Different seeds produced identical events (extremely unlikely!)"
-            print("[✓] Test 4 passed: Different seed produces different events")
-
-    print("\nAll seed reproducibility tests passed! [✓]\n")
-    return {"status": "ok"}
-
-
-def test_finals_only_filtering():
-    """Test that finals_only parameter correctly filters particles."""
-    print(">> Testing finals_only filtering...\n")
-
-    # Check if test card exists
-    card_path = base_directory + "/cards/pp_ttbar.yaml"
-    if not os.path.exists(card_path):
-        print(f"[⊘] Skipping finals_only test: card not found at {card_path}\n")
-        return None
-
-    # Generate with finals_only=True
-    tool_finals = SherpaFromRunCardTool(
-        base_directory=base_directory,
-        data_dir="data_finals_test/",
-        cmnd_path=card_path,
-        n_events=100,
-        seed=2345,
-        finals_only=True,
-        full_history=False
-    )
-    tool_finals._setup()
-    finals_raw = tool_finals._run()
-
-    try:
-        finals_output = json.loads(finals_raw)
-    except (json.JSONDecodeError, ValueError):
-        print(f"[⊘] Skipping finals_only test: generation with finals_only=True failed\n")
-        return None
-
-    if finals_output.get("status") != "ok":
-        print(f"[⊘] Skipping finals_only test: generation with finals_only=True failed\n")
-        return None
-
-    # Generate with finals_only=False
-    tool_all = SherpaFromRunCardTool(
-        base_directory=base_directory,
-        data_dir="data_all_test/",
-        cmnd_path=card_path,
-        n_events=100,
-        seed=2345,  # Same seed to compare same event
-        finals_only=False,
-        full_history=False
-    )
-    tool_all._setup()
-    all_raw = tool_all._run()
-
-    try:
-        all_output = json.loads(all_raw)
-    except (json.JSONDecodeError, ValueError):
-        print(f"[⊘] Skipping finals_only test: generation with finals_only=False failed\n")
-        return None
-
-    if all_output.get("status") != "ok":
-        print(f"[⊘] Skipping finals_only test: generation with finals_only=False failed\n")
-        return None
-
-    # Load and compare first events
-    finals_path = os.path.join(base_directory, "data_finals_test", "events.jsonl")
-    all_path = os.path.join(base_directory, "data_all_test", "events.jsonl")
-
-    with open(finals_path, "r") as f_finals, open(all_path, "r") as f_all:
-        event_finals = json.loads(f_finals.readline())
-        event_all = json.loads(f_all.readline())
-
-        particles_finals = event_finals["data"]["particles"]
-        particles_all = event_all["data"]["particles"]
-
-        # Test 1: finals_only has fewer or equal particles
-        assert len(particles_finals) <= len(particles_all), \
-            f"finals_only has MORE particles ({len(particles_finals)}) than all ({len(particles_all)})"
-        print(f"[✓] Test 1 passed: finals_only filtered correctly ({len(particles_finals)} ≤ {len(particles_all)})")
-
-        # Test 2: All particles in finals_only should have status==1 (final state)
-        if particles_finals and "status" in particles_finals[0]:
-            all_final = all(p.get("status") == 1 for p in particles_finals)
-            if all_final:
-                print("[✓] Test 2 passed: All particles have status==1 (final state)")
-            else:
-                print("[⊘] Test 2 partial: Some particles don't have status==1")
-        else:
-            print("[✓] Test 2 passed: No status field to validate")
-
-        # Test 3: finals_only should exclude intermediate particles
-        particle_diff = len(particles_all) - len(particles_finals)
-        if particle_diff > 0:
-            print(f"[✓] Test 3 passed: Filtering removed {particle_diff} intermediate particles")
-        else:
-            print("[⊘] Test 3 note: No particles filtered (process may produce only finals)")
-
-    print("\nAll finals_only filtering tests passed! [✓]\n")
-    return {"status": "ok"}
-
-
-def test_edit_sherpa_card():
-    """Test the _edit_sherpa_card function for replacing LHE paths."""
-    print(">> Testing run preparation for Sherpa ...\n")
-
-    # Sample template card with LHE input
-    template = """
-BEAMS: 2212
-BEAM_ENERGIES: 6500
-MI_HANDLER: None
-ME_GENERATORS: [ Comix ]
-FRAGMENTATION: Off
-PARTICLE_DATA:
-    9000005: {Width: 0}
-PROCESSES:
-- 93 93 -> 9000005[a] -9000005[b]:
-    Decay: 9000005[a] -> 11 2
-    Decay: -9000005[b] -> -11 -2
+The card grammar, the validator, the record conversion and the dataset
+layout are tested without Sherpa, on cards and on an event built from a
+stand-in for Sherpa's blob list. The real chain -- generation through the
+Python interface and through the driver, the dry run, HepMC3 with the
+genealogy, Rivet -- runs when the sherpa-mc wheel is importable (and a C++
+compiler, and RIVET_PATH, are available).
 """
 
-    # Test 1: Prepare UFO for use with Sherpa
-    ufo_test_path = 'tools/feynrules/test_files/models/S1_LQ_RR_UFO_nb'
-    if os.path.exists(ufo_test_path+'/.sherpa'):
-        shutil.rmtree(ufo_test_path+'/.sherpa')
-    edited = _edit_sherpa_card(template, ufo_path=ufo_test_path)
-    if edited == None:
-        print(f"[✗] UFO conversion failed")
-        return False
-    print("[✓] Test passed: UFO conversion")
+import importlib.util
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
 
-    print("\nAll run preparation tests passed! [✓]\n")
-    return True
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tools import event_io  # noqa: E402
+from tools.sherpa import card as cardmod  # noqa: E402
+from tools.sherpa import record  # noqa: E402
+from tools.sherpa.validate import (  # noqa: E402
+    ValidateSherpaRunCardTool,
+    children_of,
+    known_settings,
+    lint_card,
+    top_level_keys,
+)
+
+HAVE_SHERPA = importlib.util.find_spec("Sherpa") is not None
+HAVE_CXX = bool(os.environ.get("CXX") or shutil.which("c++"))
+HAVE_AWKWARD = importlib.util.find_spec("awkward") is not None
+HAVE_PYHEPMC = importlib.util.find_spec("pyhepmc") is not None
+HAVE_UPROOT = importlib.util.find_spec("uproot") is not None
+_REAL_RIVET = os.environ.get("RIVET_PATH", "")
+HAVE_REAL_RIVET = bool(_REAL_RIVET) and os.path.isdir(_REAL_RIVET)
+
+LEP_CARD = """\
+BEAMS: [11, -11]
+BEAM_ENERGIES: 45.6
+PDF_LIBRARY: None
+PROCESSES:
+- 11 -11 -> 93 93: {}
+"""
+
+LEP_VARIATIONS_CARD = (
+    LEP_CARD
+    + """\
+SCALE_VARIATIONS: [[0.25, 0.25], [4.0, 4.0]]
+"""
+)
 
 
-def test_event_generation(verbose=False):
-    """Test Sherpa event generation from run card."""
-    print(">> Testing Sherpa event generation...\n")
+def _json(text):
+    out = json.loads(text)
+    assert isinstance(out, dict), text
+    return out
 
-    tool_evt_gen = SherpaFromRunCardTool(
-        base_directory=base_directory,
-        data_dir="data/",
-        cmnd_path=base_directory + "/cards/pp_ttbar.yaml",
-        n_events=1000,
-        seed=12345,
-        finals_only=True,
-        full_history=False
+
+# --------------------------------------------------------------------- #
+# The card
+# --------------------------------------------------------------------- #
+
+
+def test_card_parses_to_a_mapping():
+    card = cardmod.parse_card(LEP_CARD)
+    assert card["BEAMS"] == [11, -11]
+    assert card["PROCESSES"][0] == {"11 -11 -> 93 93": {}}
+    assert cardmod.key_lines(LEP_CARD)["PROCESSES"] == 4
+
+
+def test_card_syntax_errors_name_the_line():
+    with pytest.raises(cardmod.CardError) as info:
+        cardmod.parse_card("BEAMS: [11, -11\nBEAM_ENERGIES: 45.6\n")
+    assert info.value.line is not None
+    with pytest.raises(cardmod.CardError):
+        cardmod.parse_card("- just\n- a list\n")
+
+
+def test_process_grammar():
+    incoming, outgoing = cardmod.parse_process("93 93 -> 11 -11 93{2}")
+    assert incoming == [93, 93]
+    assert outgoing == [(11, 0), (-11, 0), (93, 2)]
+    with pytest.raises(ValueError):
+        cardmod.parse_process("93 93 > 11 -11")
+    with pytest.raises(ValueError):
+        cardmod.parse_process("p p -> e+ e-")
+
+
+def test_prepared_card_adds_only_the_ufo_lines():
+    assert cardmod.prepare_card(LEP_CARD) == LEP_CARD
+    prepared = cardmod.prepare_card(LEP_CARD, ufo_model="/models/MyModel")
+    assert prepared.startswith(LEP_CARD)
+    assert "MODEL: MyModel" in prepared
+    assert "UFO_PARAM_CARD: param_MyModel.dat" in prepared
+
+
+def test_beams_from_card():
+    beams = record.beams_from_card({"BEAMS": 2212, "BEAM_ENERGIES": 6500})
+    assert [b["id"] for b in beams] == [2212, 2212]
+    assert beams[0]["pz"] > 0 > beams[1]["pz"]
+    assert beams[0]["e"] == 6500 and beams[0]["m"] == pytest.approx(
+        0.938, abs=1e-3
+    )
+    lep = record.beams_from_card(
+        {"BEAMS": [11, -11], "BEAM_ENERGIES": [45.6, 45.6]},
+        mass_of=lambda kf: 0.000511,
+    )
+    assert [b["id"] for b in lep] == [11, -11]
+    with pytest.raises(ValueError):
+        record.beams_from_card({"BEAMS": 2212})
+
+
+# --------------------------------------------------------------------- #
+# The validator
+# --------------------------------------------------------------------- #
+
+
+def test_snapshot_knows_the_settings_every_card_uses():
+    tops = top_level_keys()
+    for key in (
+        "BEAMS",
+        "BEAM_ENERGIES",
+        "PROCESSES",
+        "SELECTORS",
+        "SHOWER",
+        "SCALE_VARIATIONS",
+        "RANDOM_SEED",
+        "MODEL",
+        "RIVET",
+    ):
+        assert key in tops, key
+    assert "Order" in children_of("PROCESSES:*")
+    assert "PROCESSES:*:NLO_Mode" in known_settings()
+    assert "PARTICLE_DATA:*:Mass" in known_settings()
+
+
+def test_a_good_card_has_no_findings():
+    assert lint_card(LEP_CARD) == []
+    assert lint_card(LEP_VARIATIONS_CARD) == []
+
+
+def test_misspelt_keys_are_errors_with_a_suggestion():
+    findings = lint_card(LEP_CARD.replace("BEAM_ENERGIES", "BEAM_ENERGIEZ"))
+    errors = [f for f in findings if f["severity"] == "error"]
+    assert any(
+        f.get("key") == "BEAM_ENERGIEZ" and "BEAM_ENERGIES" in f["suggestion"]
+        for f in errors
+    )
+    # The required key is reported missing too.
+    assert any("BEAM_ENERGIES is not set" in f["message"] for f in errors)
+
+
+def test_a_misspelt_block_entry_is_caught():
+    findings = lint_card(LEP_CARD + "SHOWER:\n  FS_PT2MINN: 1.0\n")
+    assert any(
+        f["severity"] == "error"
+        and f["key"] == "SHOWER:FS_PT2MINN"
+        and "FS_PT2MIN" in f["suggestion"]
+        for f in findings
     )
 
-    tool_evt_gen._setup()
-    output_raw = tool_evt_gen._run()
 
-    try:
-        output = json.loads(output_raw)
-    except Exception:
-        print(f"[✗] Failed to parse tool output")
-        print(f"  Raw output: {output_raw}\n")
-        return None
-
-    if output.get("status") == "ok":
-        print("[✓] Events generated successfully!")
-        events_path = os.path.join(base_directory, "data", "events.jsonl")
-        print(f"  Events file: {events_path}")
-        print(f"  Event count: {output.get('accepted', 'unknown')}\n")
-
-        if verbose:
-            # Print the first 5 particles of the first event
-            with open(events_path, 'r') as f:
-                first_event = json.loads(f.readline())
-                particles = first_event['data']['particles']
-                print(f"  Total particles in first event: {len(particles)}")
-                print("\n  First 5 particles (JSONL format):")
-                for particle in particles[:5]:
-                    print(f"    {json.dumps(particle, indent=4)}")
-                print()
-
-        return output
-    else:
-        print("[✗] Event generation failed.")
-        print(f"  Error: {output.get('reason', output.get('error_message', 'Unknown error'))}\n")
-        return None
-
-
-def test_jsonl_to_numpy_conversion(verbose=False):
-    """Test JSONL to NumPy conversion."""
-    print(">> Testing JSONL to NumPy conversion...\n")
-
-    tool_evt_to_numpy = EventJSONLToNumpyTool(
-        base_directory=base_directory,
-        jsonl_path="data/events.jsonl",
-        output_path="data/events.npy"
+def test_pythia_settings_are_recognised_as_such():
+    findings = lint_card(LEP_CARD + "Beams:eCM: 91.2\n")
+    assert any(
+        "Pythia setting" in f["message"] and f["severity"] == "error"
+        for f in findings
     )
 
-    tool_evt_to_numpy._setup()
-    output_raw = tool_evt_to_numpy._run()
 
-    try:
-        output = json.loads(output_raw)
-    except Exception:
-        print(f"[✗] Failed to parse tool output")
-        print(f"  Raw output: {output_raw}\n")
-        return None
-
-    if output.get("status") == "ok":
-        print("[✓] Events converted successfully!")
-        npy_path = os.path.join(base_directory, "data", "events.npy")
-        print(f"  NumPy file: {npy_path}\n")
-
-        if verbose:
-            try:
-                import numpy as np
-                events = np.load(npy_path, allow_pickle=True)
-                print(f"  Total events in NumPy file: {len(events)}")
-                print("\n  First 5 particles from first event (NumPy format):")
-                print(f"    {events[0][:5]}\n")
-            except Exception as e:
-                print(f"  Warning: Could not load NumPy file: {e}\n")
-
-        return output
-    else:
-        print("[✗] NumPy conversion failed.")
-        print(f"  Error: {output.get('reason', output.get('error_message', 'Unknown error'))}\n")
-        return None
+def test_shapes_of_the_core_settings():
+    findings = lint_card(
+        "BEAMS: proton\nBEAM_ENERGIES: -1\nEVENTS: many\n"
+        "EVENT_GENERATION_MODE: Sometimes\nPROCESSES:\n- 93 93 -> 11 -11:\n"
+        "    Ordre: {QCD: 0}\n"
+    )
+    messages = " | ".join(
+        f["message"] + " " + f.get("suggestion", "") for f in findings
+    )
+    assert "BEAMS is one PDG id" in messages
+    assert "BEAM_ENERGIES is one positive" in messages
+    assert "EVENTS takes an integer" in messages
+    assert "EVENT_GENERATION_MODE" in messages
+    assert "Ordre" in messages and "Order" in messages
 
 
-def cleanup_test_files():
-    """Remove all test-generated files and directories."""
-    print("\n>> Cleaning up test files...\n")
+def test_selectors_and_generators_are_checked_against_sherpas_lists():
+    findings = lint_card(
+        LEP_CARD
+        + "SELECTORS:\n- [NoSuchSelector, 11, 0, 1]\n"
+        + "- [Masss, 11, -11, 60, 120]\n- [PT, 93, 20, E_CMS]\n"
+        + "ME_GENERATORS: [Comix, OpenLoops]\nSHOWER_GENERATOR: Vincia\n"
+    )
+    errors = {f["message"]: f for f in findings if f["severity"] == "error"}
+    assert any(
+        "'NoSuchSelector' is not a Sherpa selector" in m for m in errors
+    )
+    assert any(
+        "Masss" in m and "Mass" in f.get("suggestion", "")
+        for m, f in errors.items()
+    )
+    assert not any("'PT'" in m for m in errors)
+    assert any("ME_GENERATORS: 'OpenLoops'" in m for m in errors)
+    assert any("SHOWER_GENERATOR: 'Vincia'" in m for m in errors)
 
-    # Test output directories to clean up (under base_directory)
-    # Each directory contains events.jsonl, manifest.json, Sherpa.yaml,
-    # and Sherpa-generated files (Process/, Settings_Report/, *.zip)
-    cleanup_dirs = [
-        Path(base_directory) / "data",
-        Path(base_directory) / "data_seed_test_1",
-        Path(base_directory) / "data_seed_test_2",
-        Path(base_directory) / "data_seed_test_3",
-        Path(base_directory) / "data_finals_test",
-        Path(base_directory) / "data_all_test",
+
+def test_unknown_but_plausible_keys_are_warnings_not_errors():
+    findings = lint_card(LEP_CARD + "MY_OWN_PLUGIN_SETTING: 1\n")
+    assert [f["severity"] for f in findings] == ["warning"]
+
+
+def test_validator_tool_reads_a_card_and_reports(tmp_path):
+    (tmp_path / "lep.yaml").write_text(
+        LEP_CARD.replace("PROCESSES", "PROCESES")
+    )
+    out = _json(
+        ValidateSherpaRunCardTool(base_directory=str(tmp_path)).execute(
+            card_path="lep.yaml"
+        )
+    )
+    assert out["valid"] is False and out["counts"]["error"] >= 1
+    assert any(f.get("key") == "PROCESES" for f in out["findings"])
+    assert out["variations"] is False
+    inline = _json(
+        ValidateSherpaRunCardTool(base_directory=str(tmp_path)).execute(
+            card_text=LEP_VARIATIONS_CARD
+        )
+    )
+    assert inline["valid"] is True and inline["variations"] is True
+    assert "Access Denied" in ValidateSherpaRunCardTool(
+        base_directory=str(tmp_path)
+    ).execute(card_path="../lep.yaml")
+
+
+# --------------------------------------------------------------------- #
+# The record: a stand-in for Sherpa's blob list
+# --------------------------------------------------------------------- #
+
+
+class _Vec:
+    def __init__(self, e, px, py, pz):
+        self.v = [e, px, py, pz]
+
+    def __getitem__(self, k):
+        return self.v[k]
+
+    def Mass(self):
+        e, px, py, pz = self.v
+        return max(e * e - px * px - py * py - pz * pz, 0.0) ** 0.5
+
+
+class _Flav:
+    def __init__(self, kf, hadron=False):
+        self.kf, self.hadron = kf, hadron
+
+    def IsQuark(self):
+        return abs(self.kf) <= 6
+
+    def IsGluon(self):
+        return self.kf == 21
+
+    def IsDiQuark(self):
+        return 1100 <= abs(self.kf) <= 5505 and not self.hadron
+
+    def Kfcode(self):
+        return abs(self.kf)
+
+    def IsAnti(self):
+        return self.kf < 0
+
+    def IsHadron(self):
+        return self.hadron
+
+
+class _Particle:
+    _next = 1
+
+    def __init__(self, kf, mom, stat=1, hadron=False, info="F", x=None):
+        self.flav = _Flav(kf, hadron)
+        self.mom = mom
+        self.stat = stat
+        self.info = info
+        self.x = x or _Vec(0.0, 0.0, 0.0, 0.0)
+        self.prod = None
+        self.dec = None
+        self.this = _Particle._next
+        _Particle._next += 1
+
+    def Flav(self):
+        return self.flav
+
+    def Momentum(self):
+        return self.mom
+
+    def XProd(self):
+        return self.x
+
+    def Stat(self):
+        return self.stat
+
+    def Info(self):
+        return self.info
+
+    def HasProdBlob(self):
+        return self.prod is not None
+
+    def ProdBlob(self):
+        return self.prod
+
+    def HasDecBlob(self):
+        return self.dec is not None
+
+    def DecBlob(self):
+        return self.dec
+
+
+class _Blob:
+    def __init__(self, ident, incoming, outgoing, data=None):
+        self.ident = ident
+        self.incoming = incoming
+        self.outgoing = outgoing
+        self.data = data or {}
+        for p in incoming:
+            p.dec = self
+        for p in outgoing:
+            p.prod = self
+
+    def Id(self):
+        return self.ident
+
+    def NInP(self):
+        return len(self.incoming)
+
+    def NOutP(self):
+        return len(self.outgoing)
+
+    def InPart(self, j):
+        return self.incoming[j]
+
+    def OutPart(self, j):
+        return self.outgoing[j]
+
+    def __getitem__(self, name):
+        return self.data[name]
+
+
+class _BlobList:
+    def __init__(self, blobs, weight):
+        self.blobs = blobs
+        self.weight = weight
+
+    def size(self):
+        return len(self.blobs)
+
+    def __getitem__(self, k):
+        return self.blobs[k]
+
+    def GetFirst(self, _type):
+        return self.blobs[1]
+
+    def Weight(self):
+        return self.weight
+
+
+def _fake_event():
+    """e+ e- -> q qbar, the quarks into a hadronisation blob, one hadron
+    decaying to two pions: beams, a hard process, fragmentation, a decay."""
+    em = _Particle(11, _Vec(45.6, 0, 0, 45.6), stat=2, info="a")
+    ep = _Particle(-11, _Vec(45.6, 0, 0, -45.6), stat=2, info="a")
+    q = _Particle(2, _Vec(45.6, 30.0, 0, 34.3), stat=4, info="H")
+    qb = _Particle(-2, _Vec(45.6, -30.0, 0, -34.3), stat=4, info="H")
+    rho = _Particle(
+        113, _Vec(20.0, 10.0, 0, 15.0), stat=2, hadron=True, info="P"
+    )
+    pi1 = _Particle(
+        211, _Vec(30.0, 20.0, 0, 20.0), stat=1, hadron=True, info="P"
+    )
+    pi2 = _Particle(
+        -211, _Vec(41.2, -30.0, 0, -35.0), stat=1, hadron=True, info="P"
+    )
+    pia = _Particle(
+        211,
+        _Vec(10.0, 5.0, 0, 7.0),
+        stat=1,
+        hadron=True,
+        info="D",
+        x=_Vec(1.0, 0.1, 0.2, 0.3),
+    )
+    pib = _Particle(
+        -211,
+        _Vec(10.0, 5.0, 0, 8.0),
+        stat=1,
+        hadron=True,
+        info="D",
+        x=_Vec(1.0, 0.1, 0.2, 0.3),
+    )
+    blobs = [
+        _Blob(
+            10,
+            [em, ep],
+            [q, qb],
+            {
+                "Trials": 1.0,
+                "MEWeight": 2.5,
+                "Renormalization_Scale": 8317.44,
+                "Factorization_Scale": 8317.44,
+            },
+        ),
+        _Blob(11, [q, qb], [rho, pi1, pi2]),
+        _Blob(12, [rho], [pia, pib]),
     ]
+    # GetFirst(Signal_Process) is the hard-process blob.
+    blobs = [blobs[1], blobs[0], blobs[2]]
+    return _BlobList(blobs, 43552.7)
 
-    # Sherpa-generated directories in repo root (pollution from Sherpa runs)
-    repo_cleanup_dirs = [
-        REPO_ROOT / "Process",
-        REPO_ROOT / "Settings_Report",
+
+def test_event_rows_follow_the_blob_graph():
+    ev = record.event_rows(_fake_event())
+    rows = {r[0] * 1000 + r[2]: r for r in ev["p"]}  # id and info as key
+    ids = [r[0] for r in ev["p"]]
+    assert sorted(ids) == sorted([11, -11, 2, -2, 113, 211, -211, 211, -211])
+    by_id = {}
+    for r in ev["p"]:
+        by_id.setdefault(r[0], []).append(r)
+    beam = by_id[11][0]
+    assert beam[1] == -record.BEAM and beam[3] == -1 and beam[4] == 1
+    quark = by_id[2][0]
+    assert quark[1] == -record.INTERMEDIATE and quark[3] == 1 and quark[4] == 0
+    rho = by_id[113][0]
+    assert rho[1] == -record.DECAYED and rho[3] == 0 and rho[4] == 2
+    finals = [r for r in ev["p"] if r[1] == record.FINAL]
+    assert len(finals) == 4
+    decayed_pion = [r for r in finals if r[2] == ord("D")][0]
+    assert decayed_pion[10:14] == [0.1, 0.2, 0.3, 1.0]
+    assert ev["i"] == [1.0, 2.5, 8317.44, 8317.44]
+    assert ev["w"] == [43552.7]
+    assert rows  # the (id, info) pairs are distinct in this event
+
+
+@pytest.mark.skipif(not HAVE_AWKWARD, reason="awkward needed")
+def test_batch_layout_and_store_specs():
+    import awkward as ak
+
+    batch = record.batch_from_events([record.event_rows(_fake_event())] * 2)
+    assert batch.prt.fields == [
+        "id",
+        "status",
+        "info",
+        "prod_vertex",
+        "end_vertex",
+        "p",
+        "m",
+        "vProd",
     ]
+    assert ak.to_list(ak.num(batch.prt)) == [9, 9]
+    assert ak.to_list(batch.info.weights) == [[43552.7], [43552.7]]
+    assert batch.info.fields == list(record.INFO_FIELDS) + ["weights"]
+    full = event_io.apply_store(batch, store="full", precision="f64")
+    assert "prod_vertex" in full.prt.fields and "info" in full.prt.fields
+    assert event_io.has_genealogy(full)
+    finals = event_io.apply_store(batch, store="finals+kinematics")
+    assert ak.to_list(ak.num(finals.prt)) == [4, 4]
+    assert finals.prt.fields == list(event_io._KINEMATIC_FIELDS)
+    assert ak.to_list(finals.weight) == [43552.7, 43552.7]
+    assert len(record.batch_from_events([])) == 0
 
-    cleaned = 0
 
-    # Remove test directories
-    for dir_path in cleanup_dirs:
-        if dir_path.exists():
-            try:
-                shutil.rmtree(dir_path)
-                print(f"[✓] Removed directory: {dir_path.relative_to(base_directory)}")
-                cleaned += 1
-            except Exception as e:
-                print(f"[⚠] Failed to remove {dir_path.name}: {e}")
+@pytest.mark.skipif(
+    not (HAVE_AWKWARD and HAVE_PYHEPMC), reason="awkward and pyhepmc needed"
+)
+def test_hepmc3_from_the_vertex_graph(tmp_path):
+    import pyhepmc
 
-    # Remove Sherpa-polluted directories from repo root
-    for dir_path in repo_cleanup_dirs:
-        if dir_path.exists():
-            try:
-                shutil.rmtree(dir_path)
-                print(f"[✓] Removed Sherpa-generated directory from repo root: {dir_path.name}")
-                cleaned += 1
-            except Exception as e:
-                print(f"[⚠] Failed to remove {dir_path.name}: {e}")
+    batch = record.batch_from_events([record.event_rows(_fake_event())])
+    beams = record.beams_from_card({"BEAMS": [11, -11], "BEAM_ENERGIES": 45.6})
+    path = str(tmp_path / "ev.hepmc")
+    with event_io.EventWriter(
+        path, store="full", fmt="hepmc3", beams=beams
+    ) as w:
+        w.write(batch)
+    with pyhepmc.open(path) as handle:
+        event = handle.read()
+    statuses = sorted(p.status for p in event.particles)
+    assert statuses == [1, 1, 1, 1, 2, 4, 4, 11, 11]
+    assert len(event.vertices) == 3
+    decay = [v for v in event.vertices if len(v.particles_in) == 1][0]
+    assert decay.particles_in[0].pid == 113
+    assert [p.pid for p in decay.particles_out] == [211, -211]
+    assert decay.position.x == pytest.approx(0.1)
+    hard = [
+        v
+        for v in event.vertices
+        if len(v.particles_in) == 2
+        and {p.pid for p in v.particles_in} == {11, -11}
+    ][0]
+    assert {p.pid for p in hard.particles_out} == {2, -2}
 
-    # Remove Sherpa-generated files from repo root
-    repo_cleanup_files = [
-        REPO_ROOT / "Comix.zip",
-        REPO_ROOT / "Sherpa.zip",
-        REPO_ROOT / "Results.zip",
-        REPO_ROOT / "Results.zip~",
-        REPO_ROOT / "References.tex",
+
+def _cyclic_event():
+    """Sherpa's actual shower structure: one shower blob takes the beam
+    leptons in and gives out the copies that enter the hard process, and
+    takes the hard process's quarks in and gives out their showered
+    products. The hard-process vertex and the shower vertex feed each
+    other."""
+    em0 = _Particle(11, _Vec(45.6, 0, 0, 45.6), stat=2, info="a")
+    ep0 = _Particle(-11, _Vec(45.6, 0, 0, -45.6), stat=2, info="a")
+    em1 = _Particle(11, _Vec(45.6, 0, 0, 45.6), stat=2, info="I")
+    ep1 = _Particle(-11, _Vec(45.6, 0, 0, -45.6), stat=2, info="I")
+    em2 = _Particle(11, _Vec(45.6, 0, 0, 45.6), stat=2, info="G")
+    ep2 = _Particle(-11, _Vec(45.6, 0, 0, -45.6), stat=2, info="G")
+    q = _Particle(1, _Vec(45.6, 30.0, 0, 34.3), stat=2, info="H")
+    qb = _Particle(-1, _Vec(45.6, -30.0, 0, -34.3), stat=2, info="H")
+    q2 = _Particle(1, _Vec(40.0, 26.0, 0, 30.0), stat=1, info="F")
+    g = _Particle(21, _Vec(11.2, 4.0, 0, 4.3), stat=1, info="F")
+    qb2 = _Particle(-1, _Vec(40.0, -30.0, 0, -34.3), stat=1, info="F")
+    beam_a = _Blob(1, [em0], [em1])
+    beam_b = _Blob(2, [ep0], [ep1])
+    hard = _Blob(
+        3,
+        [em2, ep2],
+        [q, qb],
+        {
+            "Trials": 1.0,
+            "MEWeight": 1.0,
+            "Renormalization_Scale": 8317.0,
+            "Factorization_Scale": 8317.0,
+        },
+    )
+    shower = _Blob(4, [em1, ep1, q, qb], [em2, ep2, q2, g, qb2])
+    return _BlobList([beam_a, hard, beam_b, shower], 43552.7)
+
+
+def test_a_beam_hadron_breaking_up_is_not_a_decay():
+    """The proton's copy goes into a blob of its own that gives out partons;
+    Rivet reads a status-2 hadron ancestor as "from a hadron decay" and
+    would call every particle of the event non-prompt."""
+    p0 = _Particle(
+        2212, _Vec(3500.0, 0, 0, 3500.0), stat=2, info="a", hadron=True
+    )
+    p1 = _Particle(
+        2212, _Vec(3500.0, 0, 0, 3500.0), stat=2, info="I", hadron=True
+    )
+    u = _Particle(2, _Vec(700.0, 0, 0, 700.0), stat=1, info="I")
+    remnant = _Particle(2101, _Vec(2800.0, 0, 0, 2800.0), stat=1, info="I")
+    u.flav.IsQuark = lambda: True
+    u.flav.IsGluon = lambda: False
+    u.flav.IsDiQuark = lambda: False
+    remnant.flav.IsQuark = lambda: False
+    remnant.flav.IsGluon = lambda: False
+    remnant.flav.IsDiQuark = lambda: True
+    for part in (p0, p1):
+        part.flav.IsQuark = lambda: False
+        part.flav.IsGluon = lambda: False
+        part.flav.IsDiQuark = lambda: False
+    beam = _Blob(1, [p0], [p1], {"Trials": 1.0})
+    bunch = _Blob(2, [p1], [u, remnant])
+    rows = record.event_rows(_BlobList([beam, bunch], 1.0))["p"]
+    by_info = {chr(r[2]): r for r in rows if r[0] == 2212}
+    assert by_info["a"][1] == -record.BEAM
+    assert by_info["I"][1] == -record.INTERMEDIATE
+    # A hadron that decays to hadrons is still a decay.
+    rho = _Particle(
+        113, _Vec(20.0, 10.0, 0, 15.0), stat=2, hadron=True, info="P"
+    )
+    pi1 = _Particle(
+        211, _Vec(10.0, 5.0, 0, 7.0), stat=1, hadron=True, info="D"
+    )
+    pi2 = _Particle(
+        -211, _Vec(10.0, 5.0, 0, 8.0), stat=1, hadron=True, info="D"
+    )
+    for part in (rho, pi1, pi2):
+        part.flav.IsQuark = lambda: False
+        part.flav.IsGluon = lambda: False
+        part.flav.IsDiQuark = lambda: False
+    _Blob(3, [p1], [rho])
+    _Blob(4, [rho], [pi1, pi2])
+    rows = record.event_rows(
+        _BlobList(
+            [beam, _Blob(5, [p1], [rho]), _Blob(6, [rho], [pi1, pi2])], 1.0
+        )
+    )["p"]
+    assert [r for r in rows if r[0] == 113][0][1] == -record.DECAYED
+
+
+def test_the_shower_vertex_is_split_so_the_graph_is_acyclic():
+    ev = record.event_rows(_cyclic_event())
+    rows = ev["p"]
+    # Before: the hard process (vertex 1) and the shower (vertex 3) feed
+    # each other.
+    assert any(r[3] == 3 and r[4] == 1 for r in rows)
+    assert any(r[3] == 1 and r[4] == 3 for r in rows)
+    record.untangle(rows)
+    assert (
+        record._find_cycle(
+            rows,
+            {
+                v: [i for i, r in enumerate(rows) if r[3] == v]
+                for v in {int(r[3]) for r in rows if r[3] >= 0}
+            },
+        )
+        is None
+    )
+    # The copies that enter the hard process now come from a vertex of
+    # their own, fed by the beam leptons; the showered partons still come
+    # from the shower vertex, fed by the hard process's quarks.
+    copies = [r for r in rows if r[2] == ord("G")]
+    assert {r[3] for r in copies} == {4} and {r[4] for r in copies} == {1}
+    initial = [r for r in rows if r[2] == ord("I")]
+    assert {r[4] for r in initial} == {4}
+    showered = [r for r in rows if r[2] == ord("F")]
+    assert {r[3] for r in showered} == {3}
+    hard_out = [r for r in rows if r[2] == ord("H")]
+    assert {r[3] for r in hard_out} == {1} and {r[4] for r in hard_out} == {3}
+
+
+@pytest.mark.skipif(
+    not (HAVE_AWKWARD and HAVE_PYHEPMC), reason="awkward and pyhepmc needed"
+)
+def test_hepmc3_of_the_real_shower_structure(tmp_path):
+    import pyhepmc
+
+    batch = record.batch_from_events([record.event_rows(_cyclic_event())])
+    beams = record.beams_from_card({"BEAMS": [11, -11], "BEAM_ENERGIES": 45.6})
+    path = str(tmp_path / "ev.hepmc")
+    with event_io.EventWriter(
+        path, store="full", fmt="hepmc3", beams=beams
+    ) as w:
+        w.write(batch)
+    with pyhepmc.open(path) as handle:
+        event = handle.read()
+    assert (
+        sorted(p.status for p in event.particles) == [1, 1, 1, 4, 4] + [11] * 6
+    )
+    assert len(event.vertices) == 5
+    hard = [
+        v
+        for v in event.vertices
+        if {p.pid for p in v.particles_out} == {1, -1}
     ]
-
-    for file_path in repo_cleanup_files:
-        if file_path.exists():
-            try:
-                file_path.unlink()
-                print(f"[✓] Removed Sherpa-generated file from repo root: {file_path.name}")
-                cleaned += 1
-            except Exception as e:
-                print(f"[⚠] Failed to remove {file_path.name}: {e}")
-
-    if cleaned == 0:
-        print("[i] No test files to clean up")
-    else:
-        print(f"\n[✓] Cleaned up {cleaned} item(s)\n")
+    assert len(hard) == 1 and {p.pid for p in hard[0].particles_in} == {
+        11,
+        -11,
+    }
 
 
-if __name__ == "__main__":
-    import sys
+# --------------------------------------------------------------------- #
+# The real chain
+# --------------------------------------------------------------------- #
 
-    print(f"Base directory: {base_directory}\n")
-    print("=" * 60)
 
-    # Run all tests and track failures
-    all_passed = True
+@pytest.fixture(scope="module")
+def sherpa_dir(tmp_path_factory):
+    return tmp_path_factory.mktemp("sherpa")
 
-    # Unit tests
-    try:
-        test_path_traversal_prevention()
-    except (AssertionError, Exception) as e:
-        print(f"\n[✗] test_path_traversal_prevention failed: {e}\n")
-        all_passed = False
 
-    # Integration tests
-    try:
-        test_edit_sherpa_card()
-    except (AssertionError, Exception) as e:
-        print(f"\n[✗] test_edit_sherpa_card failed: {e}\n")
-        all_passed = False
+@pytest.mark.skipif(
+    not (HAVE_SHERPA and HAVE_AWKWARD and HAVE_UPROOT),
+    reason="sherpa-mc, awkward and uproot needed",
+)
+def test_generation_through_the_python_interface(sherpa_dir):
+    from tools.sherpa.generate import SherpaFromRunCardTool
 
-    evt_output = test_event_generation(verbose=args.verbose)
-    if evt_output is None:
-        all_passed = False
+    base = sherpa_dir
+    (base / "lep.yaml").write_text(LEP_CARD)
+    tool = SherpaFromRunCardTool(base_directory=str(base))
+    out = _json(
+        tool.execute(
+            data_dir="py",
+            card_path="lep.yaml",
+            n_events=30,
+            seed=3,
+        )
+    )
+    assert out["status"] == "ok", out
+    assert out["accepted"] == 30 and out["backend"] == "sherpa-mc"
+    assert out["xsec"]["sigmaGen_pb"] == pytest.approx(4.0e4, rel=0.25)
+    assert out["xsec"]["sigmaGen_mb"] == pytest.approx(
+        out["xsec"]["sigmaGen_pb"] * 1e-9
+    )
+    assert out["weighted"] is False
+    assert out["summary"]["n_events"] == 30
+    assert (base / "py" / "run.yaml").read_text() == LEP_CARD
+    manifest = json.loads((base / "py" / "manifest.json").read_text())
+    assert manifest["sherpa_version"].startswith("3.")
+    assert manifest["beams"][0]["id"] == 11
+    events = event_io.load_events(str(base / "py" / "events.root"))
+    assert len(events) == 30
+    # Unweighted: every event carries the same weight, a cross section in
+    # pb of the order of the total; the sum is the weight times the count.
+    weight = float(events.weight[0])
+    assert weight == pytest.approx(out["xsec"]["sigmaGen_pb"], rel=0.25)
+    assert manifest["outputs"]["xsec"]["weightSum"] == pytest.approx(
+        30 * weight, rel=1e-6
+    )
+    # Sherpa's own output went to the log (the citation box ends every
+    # run), and nothing of it reached the result.
+    assert "References.tex" in (base / "py" / "sherpa.log").read_text()
 
-    numpy_output = None
-    if evt_output:
-        numpy_output = test_jsonl_to_numpy_conversion(verbose=args.verbose)
-        if numpy_output is None:
-            all_passed = False
 
-    # Advanced integration tests (require Sherpa to work)
-    if evt_output is not None:
-        try:
-            seed_result = test_seed_reproducibility()
-            # Don't mark as failed if skipped (returns None)
-            # Only fail if it ran and threw an exception
-        except (AssertionError, Exception) as e:
-            print(f"\n[✗] test_seed_reproducibility failed: {e}\n")
-            all_passed = False
+@pytest.mark.skipif(
+    not (HAVE_SHERPA and HAVE_AWKWARD and HAVE_PYHEPMC),
+    reason="sherpa-mc, awkward and pyhepmc needed",
+)
+def test_full_record_reaches_hepmc3(sherpa_dir):
+    import pyhepmc
 
-        try:
-            finals_result = test_finals_only_filtering()
-            # Don't mark as failed if skipped
-        except (AssertionError, Exception) as e:
-            print(f"\n[✗] test_finals_only_filtering failed: {e}\n")
-            all_passed = False
+    from tools.sherpa.generate import SherpaFromRunCardTool
 
-    # Cleanup test files unless --keep-files flag is set
-    if not args.keep_files:
-        cleanup_test_files()
+    base = sherpa_dir
+    (base / "lep.yaml").write_text(LEP_CARD)
+    out = _json(
+        SherpaFromRunCardTool(base_directory=str(base)).execute(
+            data_dir="full",
+            card_path="lep.yaml",
+            n_events=5,
+            seed=4,
+            output_format="hepmc3",
+            store="full",
+        )
+    )
+    assert out["status"] == "ok", out
+    assert out["hepmc3_record"] == "full"
+    with pyhepmc.open(str(base / "full" / "events.hepmc")) as handle:
+        event = handle.read()
+    beams = [p for p in event.particles if p.status == 4]
+    assert sorted(p.pid for p in beams) == [-11, 11]
+    assert any(p.status == 2 for p in event.particles)
+    assert all(p.status == 1 for p in event.particles if not p.end_vertex)
+    assert len(event.vertices) > 5
+    assert event.cross_section.xsec() == pytest.approx(
+        out["xsec"]["sigmaGen_pb"], rel=0.25
+    )
+    assert event.weights[0] == pytest.approx(
+        out["xsec"]["sigmaGen_pb"], rel=0.25
+    )
 
-    print("=" * 60)
-    if all_passed:
-        print("Test suite completed successfully! [✓]")
-    else:
-        print("Test suite completed with failures! [✗]")
-    print("=" * 60)
 
-    sys.exit(0 if all_passed else 1)
+@pytest.mark.skipif(not HAVE_SHERPA, reason="sherpa-mc needed")
+def test_dry_run_catches_what_the_static_checks_cannot(sherpa_dir):
+    base = sherpa_dir
+    tool = ValidateSherpaRunCardTool(base_directory=str(base))
+    good = _json(
+        tool.execute(
+            card_text=LEP_CARD,
+            dry_run_init=True,
+            work_dir="dry",
+            timeout_s=600,
+        )
+    )
+    assert good["valid"] is True, good
+    assert good["dry_run"]["ok"] is True and good["dry_run"]["fatal"] == []
+    settings = {e["setting"]: e for e in good["dry_run"]["effective_settings"]}
+    assert settings["BEAMS"]["final"].replace(" ", "") == "11,-11"
+    bad = _json(
+        tool.execute(
+            card_text=LEP_CARD + "SHOWER: {FS_PT2MIN: abc}\n",
+            dry_run_init=True,
+            work_dir="dry_bad",
+            timeout_s=600,
+        )
+    )
+    assert bad["valid"] is False
+    assert bad["dry_run"]["ok"] is False and bad["dry_run"]["fatal"], bad[
+        "dry_run"
+    ]
+    unread = _json(
+        tool.execute(
+            card_text=LEP_CARD + "MY_OWN_PLUGIN_SETTING: 1\n",
+            dry_run_init=True,
+            work_dir="dry_unread",
+            timeout_s=600,
+        )
+    )
+    assert any(
+        "never read" in f["message"]
+        and "MY_OWN_PLUGIN_SETTING" in f["message"]
+        for f in unread["findings"]
+    )
+
+
+@pytest.mark.skipif(
+    not (HAVE_SHERPA and HAVE_CXX and HAVE_AWKWARD and HAVE_UPROOT),
+    reason="sherpa-mc, a C++ compiler, awkward and uproot needed",
+)
+def test_generation_through_the_driver_carries_the_variations(sherpa_dir):
+    from tools.sherpa.generate import (
+        SherpaCPPFromRunCardTool,
+        SherpaFromRunCardTool,
+    )
+
+    base = sherpa_dir
+    (base / "var.yaml").write_text(LEP_VARIATIONS_CARD)
+    # Without sherpa_path the C++ tool builds against the wheel's libraries.
+    out = _json(
+        SherpaCPPFromRunCardTool(base_directory=str(base)).execute(
+            data_dir="drv",
+            card_path="var.yaml",
+            n_events=20,
+            seed=5,
+            chunk_size=7,
+        )
+    )
+    assert out["status"] == "ok", out
+    assert out["backend"] == "cpp" and out["accepted"] == 20
+    assert out["weight_variations"] == [
+        "MUR=0.5__MUF=0.5__LHAPDF=-1",
+        "MUR=2__MUF=2__LHAPDF=-1",
+    ]
+    events = event_io.load_events(str(base / "drv" / "events.root"))
+    assert len(events.weights[0]) == 3
+    assert float(events.weights[0][0]) == float(events.weight[0])
+    manifest = json.loads((base / "drv" / "manifest.json").read_text())
+    assert manifest["inputs"]["generator"]["backend"] == "cpp"
+    assert manifest["outputs"]["weights"]["names"][0] == "Weight"
+    # The Python interface on the same card warns that the variations are lost.
+    plain = _json(
+        SherpaFromRunCardTool(base_directory=str(base)).execute(
+            data_dir="drv_py",
+            card_path="var.yaml",
+            n_events=3,
+            seed=5,
+        )
+    )
+    assert plain["status"] == "ok"
+    assert any("variations" in w for w in plain.get("warnings", []))
+
+
+DRELL_YAN_CARD = """\
+BEAMS: 2212
+BEAM_ENERGIES: 3500
+PROCESSES:
+- 93 93 -> 11 -11:
+    Order: {QCD: 0, EW: 2}
+SELECTORS:
+- [Mass, 11, -11, 60, 120]
+"""
+
+
+@pytest.mark.skipif(
+    not (HAVE_SHERPA and HAVE_AWKWARD and HAVE_PYHEPMC and HAVE_REAL_RIVET),
+    reason="sherpa-mc, pyhepmc and RIVET_PATH needed",
+)
+def test_proton_collisions_give_rivet_prompt_leptons(sherpa_dir):
+    """Drell-Yan at 7 TeV into the ATLAS phi* analysis and MC_ZINC. The
+    beam proton breaks up into partons; were that written as a hadron
+    decay, Rivet would read every lepton as non-prompt and fill nothing."""
+    from tools.sherpa.generate import SherpaFromRunCardTool
+
+    base = sherpa_dir
+    (base / "dy.yaml").write_text(DRELL_YAN_CARD)
+    out = _json(
+        SherpaFromRunCardTool(
+            base_directory=str(base), rivet_path=_REAL_RIVET
+        ).execute(
+            data_dir="dy",
+            card_path="dy.yaml",
+            n_events=60,
+            seed=9,
+            store="full",
+            rivet_analyses=["ATLAS_2012_I1204784", "MC_ZINC:LMODE=EL"],
+        )
+    )
+    assert out["status"] == "ok", out
+    analyses = out["rivet"]["analyses"]
+    assert analyses["MC_ZINC:LMODE=EL"]["filled"] == 7, analyses
+    assert analyses["ATLAS_2012_I1204784"]["filled"] >= 1, analyses
+    assert out["xsec"]["sigmaGen_pb"] == pytest.approx(900.0, rel=0.3)
+
+
+@pytest.mark.skipif(
+    not (HAVE_SHERPA and HAVE_AWKWARD and HAVE_PYHEPMC and HAVE_REAL_RIVET),
+    reason="sherpa-mc, pyhepmc and RIVET_PATH needed",
+)
+def test_events_stream_into_rivet(sherpa_dir):
+    from tools.sherpa.generate import SherpaFromRunCardTool
+
+    base = sherpa_dir
+    (base / "lep.yaml").write_text(LEP_CARD)
+    out = _json(
+        SherpaFromRunCardTool(
+            base_directory=str(base), rivet_path=_REAL_RIVET
+        ).execute(
+            data_dir="rivet",
+            card_path="lep.yaml",
+            n_events=40,
+            seed=6,
+            store="full",
+            rivet_analyses=["ALEPH_1996_I428072"],
+        )
+    )
+    assert out["status"] == "ok", out
+    assert out["rivet"]["n_events"] == 40.0
+    assert out["rivet"]["analyses"]["ALEPH_1996_I428072"]["filled"] > 0
+    assert not any(
+        name.startswith("events.") for name in os.listdir(base / "rivet")
+    )
+    wrong = SherpaFromRunCardTool(
+        base_directory=str(base), rivet_path=_REAL_RIVET
+    ).execute(
+        data_dir="rivet_bad",
+        card_path="lep.yaml",
+        n_events=5,
+        store="full",
+        rivet_analyses=["ATLAS_2012_I1204784"],
+    )
+    assert "Incompatible Analyses" in wrong

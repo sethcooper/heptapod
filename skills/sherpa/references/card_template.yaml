@@ -1,0 +1,93 @@
+# ======================================================================
+# Annotated Sherpa 3 run card for heptapod's SherpaFromRunCardTool.
+#
+# Sherpa 3 reads YAML. Keys are upper case with underscores; a key Sherpa
+# does not know is ignored WITHOUT A WORD, so validate first with
+# ValidateSherpaRunCardTool. Energies are in GeV, cross sections in pb.
+#
+# The tool passes the event count and the seed on the command line
+# (-e, -R); EVENTS and RANDOM_SEED in the card are fallbacks.
+# ======================================================================
+
+
+# ---- 1. Beams --------------------------------------------------------
+# One id for both beams or a pair. BEAM_ENERGIES is the energy PER BEAM:
+# 6500 is a 13 TeV proton collider, [45.6, 45.6] is LEP 1 at the Z pole.
+BEAMS: 2212
+BEAM_ENERGIES: 6500
+
+# For e+e-: BEAMS: [11, -11], BEAM_ENERGIES: 45.6, and PDF_LIBRARY: None
+# (no parton densities for leptons).
+
+
+# ---- 2. Matrix elements ---------------------------------------------
+# Comix and Amegic are built in; loop amplitudes (OpenLoops, Recola) need
+# an install built with them and are not in the sherpa-mc wheel.
+ME_GENERATORS: [Comix, Amegic]
+
+
+# ---- 3. Processes ----------------------------------------------------
+# A list of process strings mapping to their options. Particles are PDG
+# ids; 93 is the light-jet container (d, u, s, c, b, their antiquarks and
+# the gluon), 90 leptons, 91 neutrinos, 92 fermions, 94 light quarks.
+# "93{2}" adds up to two extra partons at matrix-element level, which is
+# CKKW merging and needs the CKKW merging scale below.
+#
+# Order gives the coupling orders of the core process: Drell-Yan is
+# {QCD: 0, EW: 2}, dijets {QCD: 2, EW: 0}, top pairs {QCD: 2, EW: 0}.
+PROCESSES:
+- 93 93 -> 11 -11:
+    Order: {QCD: 0, EW: 2}
+#   CKKW: 20                     # merging scale in GeV, with 93{n} above
+
+# Massive particles in the final state of the matrix element need a zero
+# width there, and HARD_DECAYS to decay them afterwards:
+# PROCESSES:
+# - 93 93 -> 6 -6:
+#     Order: {QCD: 2, EW: 0}
+# HARD_DECAYS:
+#   Enabled: true
+# PARTICLE_DATA:
+#   6: {Width: 0}
+
+
+# ---- 4. Selectors (cuts at matrix-element level) ----------------------
+# A list of selectors; each is [Name, args...]. The dry run catches a
+# selector Sherpa does not have.
+SELECTORS:
+- [Mass, 11, -11, 66, 116]       # dilepton mass window in GeV
+# - [PT, 93, 20, E_CMS]          # jet pT above 20 GeV
+# - [Rapidity, 11, -2.5, 2.5]
+
+
+# ---- 5. Event generation mode and weights ----------------------------
+# Unweighted events all carry the same weight, the total cross section in
+# pb; Weighted and PartiallyUnweighted events carry varying weights, which
+# every histogram must then use.
+# EVENT_GENERATION_MODE: Unweighted
+
+# Scale and PDF variations become named extra weights per event. They
+# reach the dataset through SherpaCPPFromRunCardTool (a C++ compiler on
+# PATH; sherpa_path or the wheel); the Python interface drops them.
+# SCALE_VARIATIONS:
+# - [0.25, 0.25]
+# - [4.0, 4.0]
+# PDF_VARIATIONS:
+# - NNPDF31_nnlo_as_0118_mc
+
+
+# ---- 6. Shower, hadronisation, underlying event ----------------------
+# The defaults are the CSS shower, AHADIC hadronisation and Amisic
+# multiple interactions; these are the switches a comparison most often
+# changes.
+# SHOWER_GENERATOR: CSS            # or Dire
+# FRAGMENTATION: Ahadic            # or Lund (with Pythia 8 hadronisation)
+# MI_HANDLER: None                 # switch multiple interactions off
+# SHOWER:
+#   FS_PT2MIN: 1.0
+
+
+# ---- 7. Bookkeeping --------------------------------------------------
+# CHECK_SETTINGS makes Sherpa list, at the end, the keys it never read.
+# The validator's dry run sets it for you.
+# CHECK_SETTINGS: true

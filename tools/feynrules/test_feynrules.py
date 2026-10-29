@@ -71,7 +71,9 @@ parser.add_argument(
     action="store_true",
     help="Keep test-generated files after tests complete (useful for debugging)"
 )
-args = parser.parse_args()
+# Under pytest, sys.argv holds pytest's own arguments, which this parser
+# rejects (SystemExit: 2 at collection): read them only as a script.
+args = parser.parse_args() if __name__ == "__main__" else parser.parse_args([])
 
 
 # ============================================================================
@@ -140,8 +142,8 @@ def test_missing_parameters():
     )
 
     result = tool._run()
-    # Should fail because model file doesn't exist or wolframscript will fail
-    assert "error" in result.lower() or "not found" in result.lower() or "failed" in result.lower()
+    # Refused before FeynRules runs, naming the missing file
+    assert "Model Not Found" in result and "nonexistent/model.fr" in result
     print("[✓] Test 1 passed: Nonexistent model file is handled")
 
     # Test 2: Invalid wolframscript path

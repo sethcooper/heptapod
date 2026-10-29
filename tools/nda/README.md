@@ -148,6 +148,144 @@ diagram = {
 - `dim6-4fermion` - Dimension-6 four-fermion operator
 - `dim8-4fermion` - Dimension-8 four-fermion operator
 
+### Optional connectivity
+
+A diagram may say which lines meet at each vertex: `vertices[i].legs`, a list
+of `"in:0"`, `"out:<i>"` (index into `final`) and `"prop:<j>"` (index into
+`propagators`). With it, and final-state masses:
+
+- each internal line carries the momentum of the final-state particles on its
+  far side, so its virtuality is confined to
+  `(sum_S m)^2 <= q^2 <= (M - sum_rest m)^2`; an off-shell line with a
+  `width` uses `|P(q^2)|^2` averaged over that interval (a Breit-Wigner
+  average, which keeps the enhancement just below a threshold) when the pole
+  lies above the interval; one without a width, or whose pole lies at or below
+  the interval's lower end (`tau* -> tau nu nubar`), uses it at the interval's
+  midpoint;
+- a line that can go on shell (and has a `width`) is treated in the
+  narrow-width approximation, `Gamma = Gamma(parent -> rest + R) Gamma(R -> S) / Gamma_R`,
+  each factor estimated by the tool itself (nested resonances recursively;
+  separate lines that can resonate, such as either Z in `H -> Z Z*`, add);
+- a zero-width line that can go on shell is reported, not estimated: the
+  final state is then a lower-multiplicity decay followed by that particle's
+  decay.
+
+Other optional fields: `vertices[i].coupling_dimension` (mass dimension of a
+coupling such as a trilinear scalar or `h W W`; the raw estimate counts it in
+units of the decaying mass), `propagators[j].decay_color_factor` (to split the
+colour factor in the narrow-width approximation) and
+`check_quantum_numbers: false` (conservation already established, e.g. by a
+census built from the model's vertices).
+
+With final-state masses, phase space is the massive volume (exact recursive
+two-body factorization), not the massless formula.
+
+### From a census: EstimateCatalogueNDA
+
+`EstimateCatalogueNDA` takes an `EnumerateProcesses` output, the UFO and the
+card, and writes one request per census diagram in the format above
+(UFO masses, widths, spins and colours at the card; couplings evaluated at the
+card, chiral parts for fermion vertices; exact SU(3) colour factors;
+connectivity), runs this tool on each, and combines a channel's diagrams:
+coherently, with their coupling phases, among diagrams that differ only in
+internal-line flavour (so CKM unitarity cancels as in GIM), incoherently
+otherwise. Each request is saved with its response and reruns on its own.
+
+Each diagram's response carries its evaluated expression (`formula_type:
+"evaluated"`): the improved estimate written factor by factor,
+
+```
+Gamma = C B c_ps^(n-2) / ((2 s_P + 1) S) * P_P / (2 m_P) * Phi_n
+        * prod_v |g_v|^2 E_v^2 * prod_i P_i(E_i) * prod_j N_j(q_j^2) |D_j|^2
+```
+
+with `definitions` giving every symbol's value (energies `E_i = Ebar + m_i`,
+line virtualities and their intervals, couplings, the massive phase-space
+volume), so that substituting them reproduces `width_gev` (`factors` holds the
+numbers). `E_v^2` enters only at a vertex whose coupling multiplies a momentum
+(three vectors, or two scalars and a vector), with `E_v` the largest energy
+among its legs: the parent's mass, a final energy, or an internal line's
+square root of mean virtuality (`factors.derivative_vertices`).
+
+A massive final vector's polarization sum `P = 1 + E^2/m_V^2` grows with energy
+through its longitudinal state. By the equivalence theorem that state couples as
+the vector's Goldstone boson, in proportion to the masses at the vertex that
+emits it, so the growth needs a source there: a fermion or scalar at least as
+heavy as the vector (`N -> l W`, `t -> b W`, `h -> W W`). A vector emitted at a
+vertex without one (a gauge self-coupling, or a pair of light fermions) keeps its
+value at rest, `P = 2`: its growth cancels between diagrams (as in
+`e+ e- -> W+ W-`), which an incoherent sum of diagrams cannot see. These
+vectors are listed in `factors.unsourced_vectors`. A diagram
+estimated in the narrow-width approximation has the factorized form
+`Gamma(P -> X R) Gamma(R -> S) / Gamma_R` instead.
+
+The census writes each diagram's estimate twice, with couplings named after
+the particles at each vertex (`g_{hWW}`, `g_{We\nu_e}`). `formula` and
+`definitions` give it in its parameters:
+
+```
+Gamma ~ kappa prod_v g_v^2 m_P^a prod_j L_j,    kappa = kappa_0 r
+```
+
+`L_j` is each line's parametric size: `1/(m_j Gamma_j m_P^2)` (`1/(m_j
+Gamma_j)` for a fermion) when the estimate averages its Breit-Wigner over an
+interval holding the pole, `1/m_j^4` (`m_P^2/m_j^4` for a fermion) when
+`m_j^2` exceeds the line's virtuality, else `1/m_P^4` (`1/m_P^2` for a
+fermion); a massive final vector gives `m_P^2/m_V^2` (the number 2 in `kappa_0`
+when its growth has no source); `a` makes the dimension.
+The one definition writes `kappa_0`, the massless limit of the pure numbers
+(colour, B and spin over symmetry, the parent's polarization, `0.8^(n-2)`, the
+massless volume over `m_P^(2n-4)`, `(2/n)^k` from the fermion energies), and
+`r = kappa/kappa_0`, which holds the final-state masses, the propagators at
+their intervals and the vertex energies; `r` is left out when it is 1.
+`formula_evaluated` and `definitions_evaluated` give the factor-by-factor
+expression. A channel carries the expressions of its largest diagram and that
+diagram's share of the channel width (`formula_fraction`), and so does each
+coupling class.
+
+A channel with an external massless vector, or with a photon or gluon exchange
+whose far-side final-state particles are all massless, in a diagram whose
+estimate is at least 1e-6 of the channel's largest diagram, is
+`requires_regulator`: its uncut width diverges and is defined only with cuts.
+A photon or gluon whose far side carries mass (gamma* -> tau+ tau-,
+g* -> b bbar) has virtuality of at least that mass squared, and the channel is
+estimated like any other. An exchange suppressed by small couplings
+(h -> u ubar gamma* through y_u) is kept.
+
+Given `lower_estimates` (this tool's outputs at lower multiplicities):
+
+- external photons and gluons get the soft-collinear estimate with the
+  pair-mass regulator `m_ij^2 > y M^2` on visible pairs (`pair_mass_y`,
+  default `0.05^2`): `Gamma(P -> X) * prod_V (c_V ln^2(1/y))^(n_V) / n_V!`,
+  `c_gamma = sum_i alpha Q_i^2 / (2 pi)`, `c_g = sum_i alpha_s C_F / (2 pi)`,
+  over the final-state fermions of X (quarks only for a gluon); without an
+  emitting fermion (h -> W+ W- gamma) there is no collinear logarithm and no
+  estimate;
+- a photon or gluon that splits into a massive pair F Fbar (its far side
+  carries mass, so it is not `requires_regulator`) gets
+  `Gamma(P -> X) * c_V * k_F/(3 pi) * ln^3(M^2/4 m_F^2) / 3` in place of its
+  diagrams' estimates, with `c_V` the soft-collinear coefficient of X above,
+  `k_F = alpha Q_F^2 N_F` for a photon and `alpha_s T_F` for a gluon: the
+  emission's `ln^2(M^2/q^2)` integrated against the splitting's `dq^2/q^2`
+  from `4 m_F^2` to `M^2`. The midpoint virtuality would miss the pole at
+  `q^2 -> 4 m_F^2`. Distinct `(V, F, X)` add; the channel's other diagrams keep
+  their estimates and add incoherently (`Gamma_other`). Against MG5 (no cut;
+  no width on internal W and top lines in W and top decays) at the PDG 2026
+  card, the 129 such four-body channels have NDA/MG median 5.1, 10-90%
+  1.3-12;
+- a zero-width particle Y that goes on shell gives
+  `Gamma(P -> X Y) Gamma(Y -> S) / Gamma_Y`, with `Gamma_Y` the sum of Y's
+  lower-multiplicity widths; decays into quarks of a particle lighter than the
+  lightest hadron (pi0) are closed, and a channel whose on-shell Y has only
+  such decays (e -> nu u dbar with massless quarks) is `unphysical`.
+
+Internal photon and gluon exchange into massless daughters stays
+`requires_regulator`.
+
+On the unrestricted SM at its default card, against exact tree-level widths:
+two-body channels 0.72-1.0; all 175 finite three-body channels 0.40-0.75;
+`H -> e+ e- mu+ mu-` 0.42.
+
 ## Examples
 
 ### Example 1: Standard Model Higgs
@@ -249,7 +387,10 @@ NDA estimates decay widths using dimensional analysis:
 Factor ~ 1/M_X²  (for M_X >> E)
 ```
 
-**Accuracy:** Typically 1-2 orders of magnitude. Not a replacement for full simulation.
+**Accuracy:** Typically 1-2 orders of magnitude for a hand-written diagram;
+with connectivity and masses (as `EstimateCatalogueNDA` writes them), within a
+factor of a few across the SM decay tables above. Not a replacement for a
+calculation.
 
 ## Testing
 
