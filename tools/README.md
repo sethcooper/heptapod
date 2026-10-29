@@ -229,108 +229,393 @@ result = tool.run(
 
 ---
 
-#### PythiaFromRunCardTool
+#### PythiaFromRunCardTool / PythiaCPPFromRunCardTool
 
-**Purpose**: Hadronize and shower parton-level events using Pythia8
+**Purpose**: Generate hadron-level events with Pythia 8 from a `.cmnd` run card,
+standalone or by showering a Les Houches (LHE) file. The two tools take the
+same inputs and write the same dataset; they differ in how they reach Pythia.
+`PythiaFromRunCardTool` runs Pythia's Python interface in-process: the
+`pythia8mc` wheel, conda's `pythia8`, or the `pythia8` extension of a build
+configured `--with-python` when `pythia_path` names it (`pythia_cpp` is not
+needed for that). `PythiaCPPFromRunCardTool` compiles a small C++ driver
+against the Pythia 8 install named by `pythia_path` and runs it, at whatever
+version and with whatever plugins the install was built; it is part of the
+`pythia_cpp` bundle and needs a C++ compiler on `PATH`.
 
 **Input Parameters:**
-- `cmnd_path` (str): Path to Pythia command card (`.cmnd` file)
+- `cmnd_path` (str): Path to the Pythia run card (`.cmnd`)
 - `data_dir` (str): Output directory
 - `n_events` (int): Number of events to generate
-- `seed` (int, optional): Random seed
-- `finals_only` (bool): Keep only final-state particles (default: True)
-- `full_history` (bool): Include mother/daughter indices (default: False)
-- `shower_lhe` (bool): Shower pre-generated LHE events (default: False)
-- `lhe_path` (str, optional): Path to input LHE file (required if `shower_lhe=True`)
+- `seed` (int): Random seed in [1, 900000000], overriding any in the card;
+  -1 (default) leaves the seed to the card
+- `output_format` (str): `"root"` (default), `"hepmc3"` (for Delphes or Rivet)
+  or `"jsonl"` (human-readable)
+- `store` (str): `"finals+kinematics"` (default), `"finals"` or `"full"`
+  (every particle, with lineage; as HepMC3 this is the complete vertex
+  genealogy, which Rivet's decay-history projections need)
+- `precision` (str): `"f32"` (default) or `"f64"` for stored kinematics
+- `select_pids` (list[int]): Store only these |PDG id|s (default: all)
+- `shower_lhe` (bool) / `lhe_path` (str): Shower an LHE file; the tool sets
+  `Beams:frameType = 4` and `Beams:LHEF` itself
+- `gzip_output` (bool): Write HepMC3 or JSONL gzipped
+- `rivet_analyses` (list[str]): Stream the events into these Rivet analyses
+  through a pipe instead of writing a file (needs `store="full"` and a
+  configured `rivet_path`); `rivet_output` names the YODA file
+- `max_output_gb` (float): Stop early before the dataset exceeds this size
+  (default 2.0)
+- `pythia_path` (state): A Pythia 8 install prefix (holds
+  `bin/pythia8-config`); `PYTHIA_PATH` when unset. Required by the C++ tool;
+  the Python tool uses it only for the build's own Python extension
 
-**Modes:**
+**Example:**
+```python
+from tools.pythia import PythiaFromRunCardTool
 
-1. **Standalone Generation** (`shower_lhe=False`):
-   ```python
-   result = tool.run(
-       cmnd_path="cards/pythia_standalone.cmnd",
-       data_dir="output",
-       n_events=10000,
-       seed=42
-   )
-   ```
+tool = PythiaFromRunCardTool(base_directory="./workspace")
+result = tool.execute(
+    cmnd_path="cards/pp_ttbar.cmnd",
+    data_dir="ttbar",
+    n_events=10000,
+    seed=42,
+)
+```
 
-2. **LHE Showering** (`shower_lhe=True`):
-   ```python
-   result = tool.run(
-       cmnd_path="cards/pythia_shower.cmnd",
-       data_dir="output",
-       n_events=10000,
-       shower_lhe=True,
-       lhe_path="mg5_output/events.lhe"
-   )
-   ```
-
-**Output:**
+**Output** (abridged):
 ```json
 {
   "status": "ok",
-  "events_jsonl": "path/to/events.jsonl",
-  "n_events": 10000,
-  "schema_version": "evtjsonl-1.0"
+  "events": "ttbar/events.root",
+  "format": "root",
+  "store": "finals+kinematics",
+  "accepted": 10000,
+  "failed": 0,
+  "backend": "pythia8mc",
+  "xsec": {"sigmaGen_mb": 8.1e-07, "sigmaErr_mb": 3.2e-09,
+           "sigmaGen_pb": 810.0, "sigmaErr_pb": 3.2, "weightSum": 10000.0},
+  "weighted": false,
+  "summary": {"particles_per_event": {"mean": 567.3}, "top_species": ["..."]},
+  "pythia_log": "ttbar/pythia.log"
 }
 ```
 
-**Example Command Card** (`pythia_shower.cmnd`):
-```
-! Beams
-Beams:frameType = 4           ! LHEF input
-Beams:LHEF = {LHE_FILE_PATH}  ! Will be substituted by tool
+`data_dir` also holds `run.cmnd` (the card exactly as it ran, with includes
+inlined and the tool's overrides appended), `pythia.log` and `manifest.json`
+(the run's inputs, Pythia version, beams, cross section and weight statistics).
+Read `summary` rather than the events to check a run; if `weighted` is true,
+every histogram must use each event's `weight`. `backend` and the manifest's
+`inputs.generator` record what ran Pythia: `pythia8mc` or `pythia8` for the
+Python interface, `cpp` with the install's prefix and version for the driver.
 
-! Settings
-Random:setSeed = on
-Random:seed = {SEED}
-PartonLevel:ISR = on
-PartonLevel:FSR = on
-HadronLevel:all = on
+---
 
-! Output
-Next:numberShowEvent = 0
+#### ValidatePythiaRunCardTool
+
+**Purpose**: Check a run card before generating with it. Every line is checked
+against the installed Pythia's settings database and parser, and the mistakes
+Pythia accepts silently (a boolean typo read as `off`, `5.5` read as `5`) are
+reported too. With `dry_run_init=True` it also initialises Pythia and reports
+settings a later line (typically a `Tune:`) silently replaced.
+
+```python
+from tools.pythia import ValidatePythiaRunCardTool
+
+report = ValidatePythiaRunCardTool(base_directory="./workspace").execute(
+    cmnd_path="cards/pp_ttbar.cmnd", dry_run_init=True,
+)
 ```
+
+---
+
+#### PythiaSettingsSearchTool
+
+**Purpose**: Find a Pythia setting by name or physics phrase (`"beam energy"` →
+`Beams:eCM`), with its type, default and allowed range.
+
+---
+
+#### SherpaFromRunCardTool / SherpaCPPFromRunCardTool
+
+**Purpose**: Generate hadron-level events with Sherpa 3 from a YAML run
+card, into the same datasets the Pythia tools write. Sherpa cannot be
+initialised twice in one process, so both run it in a process of their own.
+`SherpaFromRunCardTool` runs Sherpa's Python interface in a worker: the
+`sherpa-mc` wheel, or the module of a build with Python support when
+`sherpa_path` names it; the interface exposes the nominal weight only.
+PyPI has the wheel for Linux x86_64 with glibc 2.34 or newer on Python
+3.12 and 3.13, and for macOS 15 arm64 on Python 3.13; elsewhere pip would
+build Sherpa from source, so the toolkit ships the dependency commented
+out. To install it, uncomment `sherpa-mc` under the `sherpa` bundle in
+`toolkit.yaml` and reinstall from a source checkout.
+`SherpaCPPFromRunCardTool` compiles a small C++ driver against a Sherpa
+install, the one `sherpa_path` names or the wheel's own libraries, and is
+the one that stores the card's weight variations.
+
+**Input Parameters:**
+- `card_path` (str): Path to the Sherpa `.yaml` run card
+- `data_dir` (str): Output directory; Sherpa keeps its `Process/` and
+  `Results/` there, so a second run in it reuses the integration
+- `n_events` (int): Number of events to generate
+- `seed` (int): Random seed, passed to Sherpa as `-R`; -1 (default) leaves
+  it to the card or to Sherpa
+- `output_format`, `store`, `precision`, `select_pids`, `chunk_size`,
+  `gzip_output`, `max_output_gb`: as for `PythiaFromRunCardTool`. Under
+  `store="full"` every particle carries the blob it came from and went
+  into (`prod_vertex`, `end_vertex`) and Sherpa's production-step flag
+  (`info`); the HepMC3 written is the vertex graph
+- `ufo_path` (str): A UFO model directory, converted for the Sherpa in use
+  on first use
+- `rivet_analyses` (list[str]): Stream the events into these Rivet analyses
+  instead of writing a file (needs `store="full"` and `rivet_path`)
+- `sherpa_path` (state): A Sherpa install prefix (holds `bin/Sherpa-config`);
+  `SHERPA_PATH` when unset. The C++ tool falls back to the wheel's libraries
+  without it; the Python tool uses it only for the build's own module
+
+**Output** (abridged):
+```json
+{
+  "status": "ok",
+  "events": "zee/events.root",
+  "format": "root",
+  "accepted": 10000,
+  "backend": "cpp",
+  "xsec": {"sigmaGen_pb": 1568.4, "sigmaErr_pb": 2.1,
+           "sigmaGen_mb": 1.5684e-06, "sigmaErr_mb": 2.1e-09, "weightSum": 15684000.0},
+  "weighted": false,
+  "weight_variations": ["MUR=0.5__MUF=0.5__LHAPDF=-1", "MUR=2__MUF=2__LHAPDF=-1"],
+  "summary": {"particles_per_event": {"mean": 221.7}, "top_species": ["..."]},
+  "sherpa_log": "zee/sherpa.log"
+}
+```
+
+Sherpa's event weight is a cross section in pb: in unweighted mode every
+event carries the total cross section, and `weighted` reports whether the
+weights vary. The cross section is given in pb as Sherpa reports it and in
+mb beside it for comparison with Pythia.
+
+---
+
+#### ValidateSherpaRunCardTool
+
+**Purpose**: Validate a Sherpa 3 YAML card before generating. Sherpa
+ignores a key it does not know without a word and reports a bad value only
+after the process integration has started.
+
+**Input Parameters:**
+- `card_path` (str) or `card_text` (str): The card
+- `dry_run_init` (bool): Also initialise Sherpa on the card without an
+  event: Sherpa's own fatal error if any, the settings it never read, and
+  the effective configuration from its Settings_Report
+- `work_dir` (str): Where the dry run keeps its files; the planned
+  `data_dir` lets the generation reuse the integration
+- `timeout_s` (int): Wall-clock limit for the dry run (default 1800)
+
+**Output** (abridged):
+```json
+{
+  "status": "ok",
+  "valid": false,
+  "counts": {"error": 1, "warning": 0},
+  "findings": [{"severity": "error", "line": 2, "key": "BEAM_ENERGIEZ",
+                "message": "'BEAM_ENERGIEZ' is not a Sherpa setting; it would be ignored without a word",
+                "suggestion": "did you mean BEAM_ENERGIES?"}],
+  "variations": false,
+  "dry_run": {"ok": true, "fatal": [], "unused_settings": {},
+              "effective_settings": [{"setting": "BEAMS", "default": "0, 0", "card": "2212", "final": "2212, 2212"}]},
+  "sherpa_version": "3.0.3"
+}
+```
+
+The static checks compare every key with the settings Sherpa 3.0.3 read in
+a set of reference runs (`tools/sherpa/data/settings_snapshot.json`) and
+the documented keys of the `PROCESSES` block, check the shape of the beams,
+energies, processes and selectors, and flag Pythia settings that strayed
+in.
+
+---
+
+#### PythiaCPPFromProgramTool / SherpaCPPFromProgramTool
+
+**Purpose**: Compile a C++ main program against a Pythia 8 or Sherpa
+install and run it in the sandbox, for what a run card cannot express:
+`UserHooks`, custom vetoes, analysis inside the generation loop, the Sherpa
+API. Part of the `pythia_cpp` and `sherpa_cpp` bundles, gated on
+`pythia_path` and `sherpa_path`; the Sherpa tool is in the `sherpa` bundle
+too, since it also builds against the `sherpa-mc` wheel's own libraries. A
+C++ compiler must be on `PATH` (`CXX` overrides it).
+
+**Input Parameters:**
+- `source_path` (str): The C++ source holding `main()` (`.cc`, `.cpp`, `.cxx`, `.C`)
+- `work_dir` (str): Directory to build into and run in; the program's relative
+  output paths land here
+- `extra_sources` (list[str]): Further sources to compile and link
+- `args` (list[str]): Command-line arguments for the program
+- `extra_cxxflags` / `extra_ldflags` (list[str]): Extra compiler and linker
+  flags, e.g. for FastJet, HepMC3 or Rivet
+- `build_only` (bool): Compile and link without running
+- `timeout_s` (int): Wall-clock limit for the run (default 3600)
+
+**Output** (abridged):
+```json
+{
+  "status": "ok",
+  "generator": {"generator": "pythia", "prefix": "/opt/pythia8317", "version": "8.317"},
+  "exe": "work/main_rivet",
+  "build": {"cached": false, "command": "c++ -std=c++17 ..."},
+  "run": {"returncode": 0, "elapsed_s": 41.2, "stdout_log": "work/main_rivet.stdout.log",
+          "stdout_tail": "...", "changed_files": ["work/out.yoda"]}
+}
+```
+
+The build is compiled with the install's own flags (from `pythia8-config` or
+`Sherpa-config`) and cached by a hash of the sources and flags, so a rerun
+of an unchanged program skips the compiler. `changed_files` lists what the
+run wrote under `work_dir`.
 
 ---
 
 #### JetClusterSlowJetTool
 
-**Purpose**: Perform anti-kt jet clustering on hadronized events
+**Purpose**: Cluster jets with Pythia's SlowJet, for one event or a whole
+dataset (streamed, so any size)
 
 **Input Parameters:**
-- `events_jsonl` (str): Path to hadronized events in JSONL format
-- `R` (float): Jet clustering radius (typical: 0.4 or 0.8)
-- `pT_min` (float): Minimum jet transverse momentum in GeV
-
-**Output:**
-```json
-{
-  "status": "ok",
-  "jets_jsonl": "path/to/jets.jsonl",
-  "n_events": 10000,
-  "total_jets": 45678
-}
-```
+- `events_path` (str): Dataset from `PythiaFromRunCardTool` (.root, .hepmc
+  or .jsonl), or `npy_path` for a padded NumPy array
+- `event_index` (int): One event to cluster, or `cluster_all=True` with an
+  `output_path` for every event
+- `algorithm` (str): `"antikt"` (default), `"kt"` or `"ca"`; `R` (default 0.4)
+- `ptmin` (float): Minimum jet pT in GeV (default 20); `etamax` (default 5)
+- `include_invisible` (bool): Also cluster invisible particles (default False)
 
 **Example:**
 ```python
-from pythia.pythia_tools import JetClusterSlowJetTool
+from tools.pythia import JetClusterSlowJetTool
 
 tool = JetClusterSlowJetTool(base_directory="./workspace")
-result = tool.run(
-    events_jsonl="pythia_output/events.jsonl",
+result = tool.execute(
+    events_path="ttbar/events.root",
+    cluster_all=True,
+    output_path="ttbar/jets.jsonl",
     R=0.4,
-    pT_min=20.0
+    ptmin=20.0,
 )
 ```
 
-**Note**: Uses Pythia's SlowJet algorithm (exact but slower than FastJet).
+Each jet reports `pT`, `eta` (pseudorapidity), `y` (rapidity), `phi`, its
+four-momentum and its constituents, indexed into the stored event.
 
 ---
 
 ### Data Conversion Tools
+
+#### ConvertEventsTool
+
+**Purpose**: Convert an event dataset between ROOT, HepMC3 and JSONL; the
+formats come from the file suffixes. HepMC3 output takes the run's beams,
+weight names and cross section from the `manifest.json` beside the input, or
+the beams from `beam_ids` and `beam_energies_gev`. A complete record
+(`store="full"`) becomes the full vertex genealogy; a final-state record the
+final state between the two beams (`hepmc_record` overrides the choice).
+
+```python
+from tools.events import ConvertEventsTool
+
+ConvertEventsTool(base_directory="./workspace").execute(
+    input_path="ttbar/events.root", output_path="ttbar/events.hepmc",
+)
+```
+
+---
+
+### Rivet Tools (`rivet` bundle)
+
+Generator predictions against published measurements, through a local Rivet
+installation (`rivet_path`, the prefix holding `bin/rivet-config`; a
+conda-forge environment from `conda create -n rivet -c conda-forge rivet`
+works). Everything Rivet-side runs in the installation's own Python, so the
+serving interpreter need not match it.
+
+#### RivetFindAnalysesTool
+
+**Purpose**: Search Rivet's ~2000 analyses by measurement, experiment, beams
+and √s, or describe one: what to generate (`run_info`), its options, its
+histograms, its references, and whether to trust it.
+
+```python
+from tools.rivet import RivetFindAnalysesTool
+
+RivetFindAnalysesTool(base_directory="./workspace").execute(
+    query="Z transverse momentum", beams="p+ p+", energy_gev=13000)
+RivetFindAnalysesTool(base_directory="./workspace").execute(name="ATLAS_2019_I1736531")
+```
+
+#### RunRivetTool
+
+**Purpose**: Run analyses on a HepMC3 file (plain or gzipped) and write YODA
+histograms. Before running, it checks that each analysis exists, that the
+events' beams and energy are what the analysis was measured at (Rivet runs
+an analysis at the wrong energy without a word), and that a cross section is
+available when one is needed. Reports what Rivet warned about, how many
+events were processed, and which histograms stayed empty.
+
+```python
+from tools.rivet import RunRivetTool
+
+RunRivetTool(base_directory="./workspace").execute(
+    hepmc_path="zpt/events.hepmc.gz",
+    analyses=["ATLAS_2019_I1736531", "MC_ZINC:LMODE=MU"],
+    output_path="zpt/rivet.yoda",
+)
+```
+
+The events must be the complete record (`store="full"` in
+`PythiaFromRunCardTool`): Rivet's projections walk the decay history.
+`PythiaFromRunCardTool(rivet_analyses=[...])` streams the events into Rivet
+through a pipe instead, writing no event file.
+
+#### RivetCompareTool
+
+**Purpose**: Compare the histograms with the shipped reference data, bin by
+bin: χ², degrees of freedom and p-value, the same for the shape alone (the
+prediction scaled to the data's integral), the largest pull, the mean
+prediction/data ratio, and the number of bins the prediction left empty.
+The full per-bin tables go to a JSON report.
+
+```python
+from tools.rivet import RivetCompareTool
+
+RivetCompareTool(base_directory="./workspace").execute(
+    yoda_paths=["zpt/rivet.yoda", "zpt_tuneB/rivet.yoda"], labels=["Monash", "tune B"])
+```
+
+#### RivetPlotTool
+
+**Purpose**: Draw every histogram in Rivet's layout -- data points with error
+bars, each prediction as a stepped line with its statistical band, the
+envelope of the weight variations, and a prediction/data ratio panel --
+labelled from the analysis's `.plot` file, with an `index.html` gallery.
+
+```python
+from tools.rivet import RivetPlotTool
+
+RivetPlotTool(base_directory="./workspace").execute(
+    yoda_paths=["zpt/rivet.yoda"], labels=["Pythia 8.317"], output_dir="zpt/plots")
+```
+
+#### RivetMergeTool
+
+**Purpose**: Combine the YODA outputs of independent runs (different seeds,
+or different processes with their cross sections) with `rivet-merge`, which
+reruns each analysis's `finalize` on the merged histograms.
+
+```python
+from tools.rivet import RivetMergeTool
+
+RivetMergeTool(base_directory="./workspace").execute(
+    yoda_paths=["zpt_s1/rivet.yoda", "zpt_s2/rivet.yoda"], output_path="zpt/merged.yoda")
+```
+
+---
 
 #### LHEToJSONLTool
 

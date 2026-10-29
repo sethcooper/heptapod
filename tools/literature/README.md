@@ -8,6 +8,7 @@ Find a paper, then get its text in a form worth reading.
 | read it | `ArxivSourceTool` (preferred) | `arxiv`, `literature` |
 | | `ArxivPDFTool` | `arxiv`, `literature` |
 | | `PDFToTeXTool` (fallback) | `literature` |
+| cite it | `QuoteSourceTool` | `arxiv`, `literature` |
 
 The INSPIRE bundle covers HEP metadata and citations, and has no arXiv access
 or retrieval of its own, so these are additive rather than overlapping.
@@ -15,22 +16,45 @@ or retrieval of its own, so these are additive rather than overlapping.
 Most of the document below concerns the PDF→TeX fallback, which is the hardest
 part of the bundle.
 
+## Search results on disk
+
+`ArxivSearchTool` returns a digest: the query, `request_url`, `count`, and a
+compact `papers` list of `{"id" (versioned), "title", "authors", "published",
+"category"}`, with titles cut to 150 characters, authors shortened to the
+first one or two, and no abstracts. The full result, every field of every
+paper including the abstract, is written to `research/results/<call_id>.json`
+under `base_directory` and named in the digest as `results_path` (read it
+with Python or `jq '.papers[] | {versioned_id, abstract}'`). The list is cut
+from the end so the digest (`provenance` aside) stays under about 6,000 characters; `omitted`
+(present only when non-zero) counts the papers left out, all of which are in
+the file. If the file cannot be written, `results_path` is null and the note
+says so. The helper is `tools/digest.py`.
+
 ## Where files land
 
 One directory per paper, shared by both retrieval tools, under `output_dir`
 (default `papers/`) inside the tool's `base_directory`:
 
 ```
-papers/<arxiv_id>/
-  <arxiv_id>.pdf     ArxivPDFTool
-  source.tex         ArxivSourceTool — comments stripped, \input inlined
-  source/            ArxivSourceTool — the extracted e-print archive
+papers/<arxiv_id>v<N>/
+  <arxiv_id>v<N>.pdf              ArxivPDFTool
+  <arxiv_id>v<N>.eprint.tar.gz    ArxivSourceTool — the e-print as served
+  source/                         ArxivSourceTool — the extracted originals, verbatim
+  source.tex                      ArxivSourceTool — comments stripped, \input inlined
+  retrieval.json                  URL, time and sha256 of each fetch
 ```
 
-The id is the directory name with path separators flattened, so
-`hep-ph/9905221` becomes `hep-ph_9905221`. A version suffix is preserved when
-given, and a bare PDF URL falls back to a hash of the URL, so two different
-sources never collide on one path.
+The directory is always a version. An unversioned id means "the current
+version": it is pinned to `vN` from the arXiv metadata (or, if that is
+unreachable, from the file name arXiv serves) before the cache is consulted,
+so a cached v1 is never returned for a paper that now has a v2. Path
+separators are flattened, so `hep-ph/9905221v1` becomes `hep-ph_9905221v1`. A
+bare PDF URL with no arXiv id in it falls back to a hash of the URL.
+
+`ArxivSourceTool` retries an e-print download that arXiv rate-limits (429,
+503) or cuts short (`IncompleteRead`): up to three times, after the server's
+`Retry-After` when given and otherwise after 5, 15 and 45 seconds, with at
+most 120 seconds of waiting in all. Then the error is returned.
 
 When arXiv has no source for a paper, the e-print endpoint serves the PDF
 itself. `ArxivSourceTool` saves those bytes to `pdf_path` in the same
@@ -132,9 +156,53 @@ text = pdf_to_tex("paper.pdf")           # whole document
 text = pdf_to_tex("paper.pdf", [0, 1])   # first two pages
 ```
 
-As an agent tool, `PDFToTeXTool` writes to a file under `base_directory` and
-returns the path plus a structural summary, so a long paper does not flood the
-agent's context.
+As an agent tool, `PDFToTeXTool` writes to a file under `base_directory`, each
+page preceded by a `%% page N` line, and returns JSON with the path, a
+structural summary (not the body, so a long paper does not flood the agent's
+context), the input PDF's `pdf_sha256` and, for a PDF the arXiv tools fetched,
+its `source_id`. A `<output>.provenance.json` sidecar records the same.
+
+## Provenance
+
+Every result carries a top-level `provenance` object:
+
+```
+{"call_id": "<Tool>-<yyyymmddTHHMMSSZ>-<8 hex>", "tool", "retrieved_at",
+ "request", "request_url", "api": {"name", "version"}, "from_cache",
+ "cached_at", "source_ids", "response_sha256", "saved_path"}
+```
+
+plus `files` (`[{"path", "sha256", "bytes"}]`) when the call downloaded or
+wrote files. The raw response is saved to `research/calls/<call_id>.<ext>`
+under `base_directory` (`saved_path`, hashed by `response_sha256`), and one
+line with the same fields (`ts` for `retrieved_at`) is appended to
+`research/calls.jsonl`. The recorder is `tools/provenance.py`.
+
+`source_ids` are versioned, `arXiv:<id>v<N>`; an unversioned id is never
+reported for a downloaded file. `ArxivPDFTool` and `ArxivSourceTool` also
+return `sha256` of the downloaded file (recomputed from disk on a cache hit),
+the fetched `url` and `retrieved_at`; on a cache hit `from_cache` is true and
+`cached_at` is the original fetch time.
+
+`QuoteSourceTool` turns "the paper says X" into a checkable locator. Given a
+versioned arXiv id (or a path to a fetched source, file or PDFToTeX output)
+and a `pattern` (literal, whitespace-tolerant; `regex=true` for a regular
+expression; `context_chars` for surrounding text), it returns
+
+```
+{"status": "ok", "source_id", "source_sha256", "file", "line_start",
+ "line_end", "char_start", "char_end", "section", "label", "page", "quote",
+ "match_mode", "provenance"}
+```
+
+`quote` is the verbatim text of the file at `[char_start, char_end)`; lines are
+1-based. `section` is the innermost enclosing `\section`/`\subsection` title,
+`label` the `\label` of an enclosing equation/align/table (the matched row's
+label in a multi-row environment), `page` the last `%% page N` marker above the
+match. The original files under `source/` are searched first, so line numbers
+are those of the paper as submitted. An absent pattern is an error listing the
+files searched; an ambiguous one is an error listing every match's location
+(up to 20).
 
 ## Known limitations
 

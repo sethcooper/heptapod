@@ -39,6 +39,12 @@ try:
 except ImportError:
     HAVE_PYHEPMC = False
 try:
+    import pythia8mc  # noqa: F401
+    HAVE_PYTHIA = True
+except ImportError:
+    HAVE_PYTHIA = False
+
+try:
     import uproot  # noqa: F401
     HAVE_UPROOT = True
 except ImportError:
@@ -162,10 +168,10 @@ class TestRunContract(_Tmp):
                      "needs DELPHES_DIR + pyhepmc + uproot")
 class TestRealChain(unittest.TestCase):
     """The whole link this package exists for, against the real binary:
-    evtjsonl -> HepMC -> Delphes(CMS card) -> ROOT -> recojsonl."""
+    events -> HepMC3 -> Delphes(CMS card) -> ROOT -> recojsonl."""
 
     def test_end_to_end(self):
-        from tools.hepmc import JSONLToHepMCTool
+        from tools.events import ConvertEventsTool
 
         with tempfile.TemporaryDirectory() as base:
             # Three e+e- + photon events, central and hard enough to
@@ -186,8 +192,10 @@ class TestRealChain(unittest.TestCase):
                         "data": {"n": len(particles), "particles": particles},
                     }) + "\n")
 
-            conv = JSONLToHepMCTool(jsonl_path="events.jsonl",
-                                    hepmc_path="events.hepmc")
+            conv = ConvertEventsTool(input_path="events.jsonl",
+                                     output_path="events.hepmc",
+                                     beam_ids=[2212, 2212],
+                                     beam_energies_gev=[6800.0, 6800.0])
             conv.base_directory = base
             self.assertEqual(json.loads(conv._run())["n_events"], 3)
 
@@ -213,6 +221,39 @@ class TestRealChain(unittest.TestCase):
             self.assertIn("met", lines[0]["data"])
             # At least one event reconstructs at least one electron.
             self.assertTrue(any(ev["data"].get("electrons") for ev in lines))
+
+    @unittest.skipUnless(HAVE_PYTHIA, "needs pythia8mc")
+    def test_pythia_hepmc_reaches_delphes(self):
+        """Pythia's final state must reach Delphes as status-1 particles.
+
+        The JSONL bridge this replaced copied Pythia's status codes (62, 83,
+        91, ...) into the HepMC file; Delphes reads only status 1, so every
+        event reconstructed empty.
+        """
+        from tools.pythia.generate import PythiaFromRunCardTool
+
+        with tempfile.TemporaryDirectory() as base:
+            Path(base, "run.cmnd").write_text(
+                "Beams:eCM = 13600.\nHardQCD:all = on\nPhaseSpace:pTHatMin = 100.\n")
+            gen = json.loads(PythiaFromRunCardTool(base_directory=base).execute(
+                data_dir="gen", cmnd_path="run.cmnd", n_events=5, seed=11,
+                output_format="hepmc3"))
+            self.assertEqual(gen["status"], "ok")
+
+            sim = DelphesFromHepMCTool(hepmc_path=gen["events"],
+                                       output_root="delphes/out.root", timeout_s=600)
+            sim.base_directory = base
+            sim.delphes_path = os.path.expanduser(_REAL_DELPHES)
+            self.assertEqual(json.loads(sim._run())["status"], "ok")
+
+            flat = DelphesROOTToJSONLTool(root_path="delphes/out.root",
+                                          jsonl_path="reco.jsonl")
+            flat.base_directory = base
+            self.assertEqual(json.loads(flat._run())["n_events"], 5)
+            lines = [json.loads(line) for line in
+                     Path(base, "reco.jsonl").read_text().splitlines()]
+            # Hard QCD above 100 GeV: every event has jets.
+            self.assertTrue(all(ev["data"].get("jets") for ev in lines))
 
 
 @unittest.skipUnless(HAVE_UPROOT, "needs uproot")

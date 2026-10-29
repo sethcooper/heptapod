@@ -274,6 +274,39 @@ def parse_couplings(ufo_dir: str) -> Dict[str, str]:
     return out
 
 
+def parse_coupling_orders(ufo_dir: str) -> Dict[str, Dict[str, int]]:
+    """``{GC_name: {order: power}}``, e.g. ``{"GC_11": {"QCD": 1}}``.
+
+    A coupling whose ``order`` is missing or not a literal dict maps to an
+    empty dict, which counts as order zero in every coupling.
+    """
+    path = os.path.join(ufo_dir, "couplings.py")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            tree = ast.parse(fh.read())
+    except (OSError, SyntaxError):
+        return {}
+
+    out: Dict[str, Dict[str, int]] = {}
+    for stmt in ast.walk(tree):
+        if not isinstance(stmt, ast.Assign) or len(stmt.targets) != 1:
+            continue
+        target, call = stmt.targets[0], stmt.value
+        if not isinstance(target, ast.Name) or not isinstance(call, ast.Call):
+            continue
+        fname = getattr(call.func, "id", None) or getattr(call.func, "attr", None)
+        if fname != "Coupling":
+            continue
+        kw = {k.arg: k.value for k in call.keywords if k.arg}
+        try:
+            orders = ast.literal_eval(kw["order"]) if "order" in kw else {}
+        except ValueError:
+            orders = {}
+        out[target.id] = {str(k): int(v) for k, v in orders.items()} \
+            if isinstance(orders, dict) else {}
+    return out
+
+
 def evaluate_couplings(
     ufo_dir: str,
     overrides: Optional[Dict[str, float]] = None,
@@ -360,6 +393,7 @@ def vertex_couplings(ufo_dir: str) -> List[Dict[str, Any]]:
                     for e in v.elts]
 
         out.append({
+            "name": ast.literal_eval(kws["name"]) if "name" in kws else None,
             "particles": names,
             "lorentz": _names("lorentz"),
             "color": _names("color"),

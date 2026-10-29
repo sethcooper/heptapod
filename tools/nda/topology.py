@@ -145,6 +145,10 @@ class TopologySpec:
     n_propagators_max: Optional[int]  # Maximum internal propagators (None = unlimited)
     loop_order: int  # Expected loop order (0=tree, 1=one-loop, etc.)
     description: str
+    # When True the vertex ceiling is set by the external legs instead of
+    # n_vertices_max: a connected tree with E external legs has at most E - 2
+    # internal vertices (all 3-point), i.e. a 1 -> n decay has up to n - 1.
+    vertices_bounded_by_legs: bool = False
 
     def validate(self, diagram: Dict[str, Any]) -> tuple[bool, str]:
         """
@@ -180,6 +184,14 @@ class TopologySpec:
             return False, f"{self.name} requires at least {self.n_vertices_min} vertices, got {len(vertices)}"
         if self.n_vertices_max and len(vertices) > self.n_vertices_max:
             return False, f"{self.name} requires at most {self.n_vertices_max} vertices, got {len(vertices)}"
+        if self.vertices_bounded_by_legs:
+            n_legs = len(initial) + len(final)
+            v_max = max(1, n_legs - 2)
+            if len(vertices) > v_max:
+                return False, (
+                    f"{self.name}: a tree with {n_legs} external legs has at most "
+                    f"{v_max} vertices (E - 2), got {len(vertices)}"
+                )
 
         # Check propagator count
         if len(propagators) < self.n_propagators_min:
@@ -242,17 +254,22 @@ TOPOLOGIES = {
         description="Tree 2-body via direct vertex (e.g., H→bb, H→WW)"
     ),
 
+    # "tree_Nbody" without a _Mprop suffix names the multiplicity only: any
+    # connected tree with N final states (contact vertex, or an internal
+    # line such as the W in mu -> e nu nu).  Generated for every N by
+    # resolve_topology(); tree_3body / tree_nbody are listed explicitly.
     "tree_3body": TopologySpec(
         name="tree_3body",
         n_initial=1,
         n_final_min=3,
         n_final_max=3,
         n_vertices_min=1,
-        n_vertices_max=1,
+        n_vertices_max=None,
         n_propagators_min=0,
-        n_propagators_max=0,
-        loop_order=0,  # L = 0 - 1 + 1 = 0 ✓
-        description="Tree 3-body via effective vertex (e.g., μ→eνν via Fermi operator)"
+        n_propagators_max=None,
+        loop_order=0,  # I = V - 1
+        description="Tree 3-body: contact vertex (Fermi operator) or 1 propagator (μ→eνν via W)",
+        vertices_bounded_by_legs=True,
     ),
 
     "tree_nbody": TopologySpec(
@@ -261,11 +278,12 @@ TOPOLOGIES = {
         n_final_min=2,
         n_final_max=None,
         n_vertices_min=1,
-        n_vertices_max=1,
+        n_vertices_max=None,
         n_propagators_min=0,
-        n_propagators_max=0,
-        loop_order=0,  # L = 0 - 1 + 1 = 0 ✓
-        description="Tree n-body via direct vertex (generic effective operator)"
+        n_propagators_max=None,
+        loop_order=0,  # I = V - 1
+        description="Tree n-body, any connected tree (contact vertex or internal propagators)",
+        vertices_bounded_by_legs=True,
     ),
 
     # ========================================================================
@@ -321,7 +339,8 @@ TOPOLOGIES = {
         n_propagators_min=2,
         n_propagators_max=None,
         loop_order=0,  # L = I - V + 1 = 0, so I = V - 1 (chain/tree structure)
-        description="Tree n-body with multiple propagators (e.g., cascade decays)"
+        description="Tree n-body with multiple propagators (e.g., cascade decays)",
+        vertices_bounded_by_legs=True,
     ),
 
     # ========================================================================
@@ -384,6 +403,68 @@ TOPOLOGIES = {
         description="Custom topology (user-defined, minimal validation)"
     ),
 }
+
+
+_TREE_NAME = re.compile(r"^tree_(\d+)body(?:_(\d+)prop)?$")
+_LOOP_NAME = re.compile(r"^loop_(\d+)body$")
+
+
+def resolve_topology(name: str) -> Optional[TopologySpec]:
+    """
+    Return the TopologySpec for ``name``, generating tree specs on demand.
+
+    Explicit entries in TOPOLOGIES win.  Otherwise:
+
+    - ``tree_Nbody``        any connected tree with N final states:
+                            1 <= V <= N - 1 vertices, I = V - 1 propagators.
+    - ``tree_Nbody_Mprop``  a tree with exactly M propagators (V = M + 1),
+                            M <= N - 2 for 3-point vertices.
+    - ``loop_Nbody``        a one-loop diagram with N final states.
+
+    Returns None for names that match none of these.
+    """
+    if name in TOPOLOGIES:
+        return TOPOLOGIES[name]
+
+    m = _TREE_NAME.match(name)
+    if m:
+        n_final = int(m.group(1))
+        if n_final < 2:
+            return None
+        if m.group(2) is None:
+            return TopologySpec(
+                name=name, n_initial=1,
+                n_final_min=n_final, n_final_max=n_final,
+                n_vertices_min=1, n_vertices_max=None,
+                n_propagators_min=0, n_propagators_max=None,
+                loop_order=0,
+                description=f"Tree {n_final}-body, any connected tree",
+                vertices_bounded_by_legs=True,
+            )
+        n_prop = int(m.group(2))
+        return TopologySpec(
+            name=name, n_initial=1,
+            n_final_min=n_final, n_final_max=n_final,
+            n_vertices_min=n_prop + 1, n_vertices_max=n_prop + 1,
+            n_propagators_min=n_prop, n_propagators_max=n_prop,
+            loop_order=0,
+            description=f"Tree {n_final}-body with {n_prop} propagator(s)",
+            vertices_bounded_by_legs=True,
+        )
+
+    m = _LOOP_NAME.match(name)
+    if m:
+        n_final = int(m.group(1))
+        return TopologySpec(
+            name=name, n_initial=1,
+            n_final_min=n_final, n_final_max=n_final,
+            n_vertices_min=1, n_vertices_max=None,
+            n_propagators_min=1, n_propagators_max=None,
+            loop_order=1,
+            description=f"One-loop {n_final}-body",
+        )
+
+    return None
 
 
 def infer_topology(diagram: Dict[str, Any]) -> str:
@@ -473,8 +554,11 @@ def validate_topology(diagram: Dict[str, Any], topology: Optional[str] = None) -
     if topology is None:
         topology = infer_topology(diagram)
 
-    if topology not in TOPOLOGIES:
-        return False, f"Unknown topology: {topology}"
-
-    spec = TOPOLOGIES[topology]
+    spec = resolve_topology(topology)
+    if spec is None:
+        return False, (
+            f"Unknown topology: {topology}. Use tree_<N>body (any tree with N "
+            f"final states), tree_<N>body_<M>prop, loop_<N>body, one of "
+            f"{sorted(TOPOLOGIES)}, or omit 'topology' to infer it."
+        )
     return spec.validate(diagram)

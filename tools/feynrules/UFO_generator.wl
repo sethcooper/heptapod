@@ -42,34 +42,34 @@ ClearAll["Global`*"];
 (* ---- Parse command-line args as key=value pairs. ---- *)
 (* StringSplit is limited to two parts so a value may itself contain "=",
    which a Lagrangian expression legitimately can. *)
-params = Association @ Map[
+heptapodParams = Association @ Map[
     Rule @@ StringSplit[#, "=", 2] &,
     Rest[$ScriptCommandLine]
 ];
 
-boolParam[key_String, default_] :=
-  Switch[ToLowerCase[ToString[Lookup[params, key, default]]],
+heptapodBoolParam[key_String, default_] :=
+  Switch[ToLowerCase[ToString[Lookup[heptapodParams, key, default]]],
     "true", True, "false", False, _, default];
 
 (* ---- Set paths from args, falling back to env vars. ---- *)
 If[!ValueQ[$FeynRulesPath],
-  $FeynRulesPath = Lookup[params, "FeynRulesPath",
+  $FeynRulesPath = Lookup[heptapodParams, "FeynRulesPath",
     With[{env = Environment["FEYNRULES_PATH"]}, If[env === $Failed, Missing["nf"], env]]
   ];
 ];
 If[!ValueQ[$ModelPath],
-  $ModelPath = Lookup[params, "ModelPath",
+  $ModelPath = Lookup[heptapodParams, "ModelPath",
     With[{env = Environment["FR_MODEL_PATH"]}, If[env === $Failed, Missing["nf"], env]]
   ];
 ];
-If[!ValueQ[$OutputDir], $OutputDir = Lookup[params, "OutputDir", "UFO_Output"]];
+If[!ValueQ[$OutputDir], $OutputDir = Lookup[heptapodParams, "OutputDir", "UFO_Output"]];
 
-$LagrangianSpec = Lookup[params, "Lagrangian", None];
-$LoadSM         = boolParam["LoadSM", True];
+$LagrangianSpec = Lookup[heptapodParams, "Lagrangian", None];
+$LoadSM         = heptapodBoolParam["LoadSM", True];
 (* Tri-state. Unset leaves whatever the model files set, which is what every
    caller before this parameter existed got. *)
-$FeynmanGaugeArg = Lookup[params, "FeynmanGauge", None];
-$ExpandIndices  = boolParam["ExpandIndices", True];
+$FeynmanGaugeArg = Lookup[heptapodParams, "FeynmanGauge", None];
+$ExpandIndices  = heptapodBoolParam["ExpandIndices", True];
 (* Which consistency checks to run.  Two of the six are excluded by default:
    CheckDiagonalQuadraticTerms operates on GetQuadraticTerms without the
    scalar-vector DeleteCases that makes CheckDiagonalKineticTerms usable, so it
@@ -83,7 +83,7 @@ $DefaultChecks = {"hermiticity", "kinetic_diagonal", "mass_diagonal",
 $AllChecks     = {"hermiticity", "kinetic_diagonal", "quadratic_diagonal",
                   "mass_diagonal", "kinetic_norm", "mass_spectrum"};
 
-$ChecksRaw = ToString[Lookup[params, "Checks", "true"]];
+$ChecksRaw = ToString[Lookup[heptapodParams, "Checks", "true"]];
 $SelectedChecks = Switch[ToLowerCase[$ChecksRaw],
   "false", {},
   "true",  $DefaultChecks,
@@ -95,12 +95,12 @@ $UnknownChecks  = Complement[$SelectedChecks, $AllChecks];
    deliberate -- cheapest and most fundamental first. *)
 $SelectedChecks = Select[$SelectedChecks, MemberQ[$AllChecks, #] &];
 $RunChecks      = Length[$SelectedChecks] > 0;
-$ChecksOnly     = boolParam["ChecksOnly", False];
-$StrictChecks   = boolParam["StrictChecks", False];
+$ChecksOnly     = heptapodBoolParam["ChecksOnly", False];
+$StrictChecks   = heptapodBoolParam["StrictChecks", False];
 (* Comparing against an SM-only run is only meaningful if the SM is loaded, and
    only worth its cost -- a second pass of every check -- when running checks
    the SM itself fails.  Off by default now that those are opt-in. *)
-$BaselineCompare = boolParam["BaselineCompare", False] && $LoadSM;
+$BaselineCompare = heptapodBoolParam["BaselineCompare", False] && $LoadSM;
 
 (* ---- Wolfram version gate. ---- *)
 (* FeynRules 2.3.49 (2021) predates Wolfram 14, which made Commutator and
@@ -111,13 +111,14 @@ $BaselineCompare = boolParam["BaselineCompare", False] && $LoadSM;
    well (IndexRange[Index[Spin]] no longer iterates), so decays default off
    there and MadGraph computes widths from the UFO instead. *)
 $LegacyKernel = $VersionNumber < 14;
-$AddDecays    = boolParam["AddDecays", $LegacyKernel];
+$AddDecays    = heptapodBoolParam["AddDecays", $LegacyKernel];
 
 Print["[INFO] Wolfram $VersionNumber = ", $VersionNumber];
 If[!$LegacyKernel,
   Print["[WARN] Wolfram >= 14 detected. FeynRules 2.3.49 requires the ",
         "Commutator/MatrixSymbol unprotect patch (FeynRules PR #6) on this ",
-        "kernel; without it the UFO export produces malformed output."];
+        "kernel; without it the UFO export produces malformed output. Use a ",
+        "kernel older than 14 (WOLFRAMSCRIPT_KERNELPATH=<its WolframKernel>)."];
   If[$AddDecays,
     Print["[WARN] AddDecays=true on Wolfram >= 14: the partial-width routine ",
           "is unreliable here. Let MadGraph compute widths instead."]];
@@ -134,21 +135,21 @@ If[$ModelPath === Missing["nf"] || !FileExistsQ[$ModelPath],
 (* ---- Load FeynRules. ---- *)
 (* FeynRules.m reads Global`$FeynRulesPath at load time, so it must already be
    set above; loading it without that silently fails to find its subroutines. *)
-frm = FileNameJoin[{$FeynRulesPath, "FeynRules.m"}];
-If[FileExistsQ[frm],
-  Print["[INFO] Loading via explicit file: ", frm];
-  Get[frm],
+heptapodFrm = FileNameJoin[{$FeynRulesPath, "FeynRules.m"}];
+If[FileExistsQ[heptapodFrm],
+  Print["[INFO] Loading via explicit file: ", heptapodFrm];
+  Get[heptapodFrm],
   Print["[INFO] Adding to $Path and using Needs[]. Dir: ", $FeynRulesPath];
   If[!MemberQ[$Path, $FeynRulesPath], AppendTo[$Path, $FeynRulesPath]];
   Needs["FeynRules`"]
 ];
 
 (* ---- Load the model, with or without the SM. ---- *)
-smFR = FileNameJoin[{$FeynRulesPath, "Models", "SM", "SM.fr"}];
+heptapodSmFR = FileNameJoin[{$FeynRulesPath, "Models", "SM", "SM.fr"}];
 If[$LoadSM,
-  If[FileExistsQ[smFR],
-    Print["[INFO] Loading SM from: ", smFR];
-    LoadModel[smFR, $ModelPath],
+  If[FileExistsQ[heptapodSmFR],
+    Print["[INFO] Loading SM from: ", heptapodSmFR];
+    LoadModel[heptapodSmFR, $ModelPath],
     Print["[INFO] Loading SM from search path + add-on: ", $ModelPath];
     LoadModel["SM.fr", $ModelPath]
   ],
@@ -172,21 +173,21 @@ If[$FeynmanGaugeArg =!= None,
   Print["[INFO] FeynmanGauge set by caller: ", ToString[FeynmanGauge]]];
 
 (* ---- Lagrangian resolution. ---- *)
-(* hasValue tests a symbol named by a string without evaluating it; the naive
+(* heptapodHasValue tests a symbol named by a string without evaluating it; the naive
    ValueQ[Symbol[name]] would evaluate the symbol to its value first and then
    test that instead. *)
-hasValue[name_String] := ToExpression[name, InputForm, Function[s, ValueQ[s], HoldFirst]];
-symContext[name_String] := ToExpression[name, InputForm, Function[s, Context[s], HoldFirst]];
+heptapodHasValue[name_String] := ToExpression[name, InputForm, Function[s, ValueQ[s], HoldFirst]];
+heptapodSymContext[name_String] := ToExpression[name, InputForm, Function[s, Context[s], HoldFirst]];
 
 (* Symbols a model defines that plausibly name a Lagrangian. Reported, never
    chosen: picking one silently is the failure this script exists to prevent. *)
-lagrangianCandidates[] := Select[Names["Global`L*"], hasValue];
+heptapodLagrangianCandidates[] := Select[Names["Global`L*"], heptapodHasValue];
 
 If[$LagrangianSpec === None,
   Print["Error: no Lagrangian given. Pass Lagrangian=<expression>, e.g. ",
         "Lagrangian=\"LSM + LBSM\" or Lagrangian=\"LNP\"."];
   Print["[INFO] Lagrangian-like symbols defined by this model: ",
-        StringRiffle[lagrangianCandidates[], ", "]];
+        StringRiffle[heptapodLagrangianCandidates[], ", "]];
   Quit[1];
 ];
 
@@ -195,13 +196,13 @@ If[$LagrangianSpec === None,
 $LagSymbols = DeleteDuplicates @ StringCases[
   $LagrangianSpec, RegularExpression["[A-Za-z$][A-Za-z0-9$]*"]];
 $Undefined = Select[$LagSymbols,
-  symContext[#] === "Global`" && !hasValue[#] &];
+  heptapodSymContext[#] === "Global`" && !heptapodHasValue[#] &];
 
 If[Length[$Undefined] > 0,
   Print["Error: undefined symbol(s) in Lagrangian \"", $LagrangianSpec, "\": ",
         StringRiffle[$Undefined, ", "]];
   Print["[INFO] Lagrangian-like symbols defined by this model: ",
-        StringRiffle[lagrangianCandidates[], ", "]];
+        StringRiffle[heptapodLagrangianCandidates[], ", "]];
   Quit[1];
 ];
 
@@ -297,20 +298,20 @@ Module[{unphys, names, residual},
    see tools/feynrules/lagrangian_checks.py for why, and for what each one returns.  The
    prose is captured anyway and passed through as supporting detail. *)
 
-sanitise[s_String] := StringTake[
+heptapodSanitise[s_String] := StringTake[
   StringReplace[s, {"|" -> "/", "\n" -> " ", "\r" -> " "}], UpTo[400]];
 
 (* HoldRest matters: without it the check would evaluate at the call site,
    outside the Block, and its Print output would escape uncaptured. *)
-SetAttributes[runCheck, HoldRest];
-runCheck[scope_String, name_String, verdictFn_, expr_] := Module[
+SetAttributes[heptapodRunCheck, HoldRest];
+heptapodRunCheck[scope_String, name_String, verdictFn_, expr_] := Module[
   {captured = {}, value, verdict, detail},
   value = Block[
     {Print = (AppendTo[captured, StringJoin[ToString /@ {##}]] &)},
     expr
   ];
   verdict = verdictFn[value];
-  detail  = sanitise[StringRiffle[captured, " "]];
+  detail  = heptapodSanitise[StringRiffle[captured, " "]];
   WriteString[$Output,
     "HEPTAPOD-CHECK|scope=", scope, "|name=", name,
     "|verdict=", verdict, "|detail=", detail, "\n"];
@@ -318,34 +319,34 @@ runCheck[scope_String, name_String, verdictFn_, expr_] := Module[
 ];
 
 (* Dispatch one check by name.  Switch evaluates only the matching branch, and
-   runCheck holds its expression, so nothing runs that was not asked for. *)
-runNamedCheck[scope_String, name_String, lag_] := Switch[name,
-  "hermiticity",        runCheck[scope, name, vHermiticity,   CheckHermiticity[lag]],
-  "kinetic_diagonal",   runCheck[scope, name, vBoolean,       CheckDiagonalKineticTerms[lag]],
-  "quadratic_diagonal", runCheck[scope, name, vBoolean,       CheckDiagonalQuadraticTerms[lag]],
-  "mass_diagonal",      runCheck[scope, name, vBoolean,       CheckDiagonalMassTerms[lag]],
-  "kinetic_norm",       runCheck[scope, name, vNormalisation, CheckKineticTermNormalisation[lag]],
+   heptapodRunCheck holds its expression, so nothing runs that was not asked for. *)
+heptapodRunNamedCheck[scope_String, name_String, lag_] := Switch[name,
+  "hermiticity",        heptapodRunCheck[scope, name, heptapodVHermiticity,   CheckHermiticity[lag]],
+  "kinetic_diagonal",   heptapodRunCheck[scope, name, heptapodVBoolean,       CheckDiagonalKineticTerms[lag]],
+  "quadratic_diagonal", heptapodRunCheck[scope, name, heptapodVBoolean,       CheckDiagonalQuadraticTerms[lag]],
+  "mass_diagonal",      heptapodRunCheck[scope, name, heptapodVBoolean,       CheckDiagonalMassTerms[lag]],
+  "kinetic_norm",       heptapodRunCheck[scope, name, heptapodVNormalisation, CheckKineticTermNormalisation[lag]],
   "mass_spectrum",      With[{v = CheckMassSpectrum[lag]},
-                          If[scope === "model", emitMassRows[v]];
-                          runCheck[scope, name, vSpectrum, v]],
+                          If[scope === "model", heptapodEmitMassRows[v]];
+                          heptapodRunCheck[scope, name, heptapodVSpectrum, v]],
   _,                    "inconclusive"
 ];
 
 (* Run the selected checks against one Lagrangian, returning name -> verdict. *)
-runAllChecks[scope_String, lag_, names_List] :=
-  Association[# -> runNamedCheck[scope, #, lag] & /@ names];
+heptapodRunAllChecks[scope_String, lag_, names_List] :=
+  Association[# -> heptapodRunNamedCheck[scope, #, lag] & /@ names];
 
 (* CheckHermiticity returns the Feynman rules of L - HC[L]; {} means hermitian. *)
-vHermiticity[v_] := Which[v === {}, "pass", ListQ[v], "fail", True, "inconclusive"];
+heptapodVHermiticity[v_] := Which[v === {}, "pass", ListQ[v], "fail", True, "inconclusive"];
 
 (* The three diagonality checks return True/False, and Null when there are no
    terms of that kind to examine -- which is undecided, not passing. *)
-vBoolean[v_] := Which[v === True, "pass", v === False, "fail", True, "inconclusive"];
+heptapodVBoolean[v_] := Which[v === True, "pass", v === False, "fail", True, "inconclusive"];
 
 (* CheckKineticTermNormalisation has no else-branch on its final If, so failure
    returns Null.  Null is also what a non-diagonal kinetic sector produces, so
    the two cases are separated in checks.py using the diagonality verdict. *)
-vNormalisation[v_] := If[v === True, "pass", "inconclusive"];
+heptapodVNormalisation[v_] := If[v === True, "pass", "inconclusive"];
 
 (* CheckMassSpectrum returns a TableForm of
    {Particle, Analytic value, Numerical value, Model-file value} rows, with
@@ -364,7 +365,7 @@ vNormalisation[v_] := If[v === True, "pass", "inconclusive"];
    numerical comparison discarding the comparison. FeynRules' own tolerance is
    0.1% (ToolBox.m: agreement is model value * 0.999 to * 1.001), so six
    figures is not even enough to see where a state sits inside it. *)
-emitMassRows[v_] := Module[{rows},
+heptapodEmitMassRows[v_] := Module[{rows},
   If[Head[v] =!= TableForm, Return[]];
   rows = First[v];
   If[!ListQ[rows] || Length[rows] < 2, Return[]];
@@ -372,13 +373,13 @@ emitMassRows[v_] := Module[{rows},
     With[{r = rows[[i]]},
       If[ListQ[r] && Length[r] >= 4,
         WriteString[$Output,
-          "HEPTAPOD-MASS|particle=", sanitise[ToString[r[[1]]]],
-          "|derived=", sanitise[ToString[N[r[[3]]], InputForm]],
-          "|declared=", sanitise[ToString[N[r[[4]]], InputForm]],
+          "HEPTAPOD-MASS|particle=", heptapodSanitise[ToString[r[[1]]]],
+          "|derived=", heptapodSanitise[ToString[N[r[[3]]], InputForm]],
+          "|declared=", heptapodSanitise[ToString[N[r[[4]]], InputForm]],
           "|agrees=", ToString[Length[r] < 5], "\n"]]],
     {i, 2, Length[rows]}];
 ];
-vSpectrum[v_] := Which[
+heptapodVSpectrum[v_] := Which[
   Head[v] =!= TableForm, "inconclusive",
   Cases[v, _StyleForm, Infinity] === {}, "pass",
   True, "fail"];
@@ -401,12 +402,12 @@ If[$RunChecks,
      which is the only version of this question worth answering. *)
   $BaselineVerdicts = If[$BaselineCompare,
     Print["[INFO] Running consistency checks on the SM baseline."];
-    runAllChecks["baseline", LSM, $SelectedChecks],
+    heptapodRunAllChecks["baseline", LSM, $SelectedChecks],
     Association[]
   ];
 
   Print["[INFO] Running consistency checks: ", StringRiffle[$SelectedChecks, ", "]];
-  $CheckVerdicts = runAllChecks["model", $LTot, $SelectedChecks];
+  $CheckVerdicts = heptapodRunAllChecks["model", $LTot, $SelectedChecks];
 
   (* Only failures the model itself introduces are worth stopping for. *)
   $NewFailures = Select[Keys[$CheckVerdicts],

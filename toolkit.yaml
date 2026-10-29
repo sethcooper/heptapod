@@ -1,5 +1,5 @@
 name: heptapod
-version: 3.0.0
+version: 3.3.2
 description: An open-source agentic toolkit for high-energy physics.
 author: Tony Menzo
 license: GPL-3.0
@@ -42,6 +42,36 @@ config:
       resolved config, not the environment.)
     type: path
     required: false
+  - name: pythia_path
+    description: A Pythia 8 install prefix, the directory holding
+      bin/pythia8-config (an in-source build after `make` works too). It
+      enables the pythia_cpp bundle, whose tools compile C++ against this
+      install (PythiaCPPFromRunCardTool through heptapod's driver,
+      PythiaCPPFromProgramTool for an agent's own main program); a C++
+      compiler must be on PATH (CXX overrides). PythiaFromRunCardTool, the
+      Python-interface tool, uses the install's pythia8 extension when the
+      build was configured --with-python for the serving Python.
+    type: path
+    required: false
+  - name: sherpa_path
+    description: A Sherpa install prefix, the directory holding bin/Sherpa
+      and bin/Sherpa-config. It enables the sherpa_cpp bundle, whose tools
+      compile C++ against this install (SherpaCPPFromRunCardTool through
+      heptapod's driver, SherpaCPPFromProgramTool for an agent's own main
+      program); a C++ compiler must be on PATH (CXX overrides).
+      SherpaFromRunCardTool, the Python-interface tool, uses the install's
+      Python module when the build has one for the serving Python.
+    type: path
+    required: false
+  - name: rivet_path
+    description: Rivet installation prefix, the directory holding
+      bin/rivet-config (a conda-forge environment created with
+      `conda create -n rivet -c conda-forge rivet` works). The rivet bundle
+      is gated on this key; set it with `tb config set heptapod rivet_path
+      <prefix>`. The RIVET_PATH env-var fallback inside the tools applies
+      only to direct in-process use.
+    type: path
+    required: false
   - name: cache_enabled
     description: Enable INSPIRE query caching.
     type: boolean
@@ -60,39 +90,25 @@ config:
     required: false
 bundles:
   # ── lightweight / always-available ───────────────────────────────
-  units: {}                              # pure python; nothing to install
-  inspire: {}                            # uses requests (always-installed base)
+  units: {}
+  inspire: {}
+  hepdata:
+    deps: [pyyaml>=6.0]
   pdg:
-    deps: [pdg>=0.2.0]                   # PDG database API
+    deps: [pdg>=0.2.0]
 
   # ── pipeline plumbing ────────────────────────────────────────────
-  # Structured provenance ledger (audit.json) for end-to-end runs; pure python.
+  # Provenance ledgers (audit.json).
   logging: {}
-  # Background jobs: run slow tools (Lagrangian checks, UFO compiles,
-  # MadGraph runs) as detached processes, poll them, collect results.
+  # Slow tools as detached processes: submit, poll, collect.
   jobs: {}
-  # Blank-slate reverse check: an independent agent reconstructs the physics
-  # from the sanitized .fr alone, then a second one compares it to the paper.
-  # Spawns the CLI named by blank_agent_cmd; pure python otherwise.
+  # Blank-slate reverse check of a .fr by the CLI agent blank_agent_cmd names.
   reverse: {}
 
   # ── literature ───────────────────────────────────────────────────
-  # TeX-faithful text extraction from LaTeX-produced PDFs. pypdfium2 is a
-  # prebuilt PDFium wheel (Apache-2.0/BSD-3) with no transitive Python
-  # dependencies, so this stays clear of the event_gen stack. The glyph
-  # table ships with the toolkit; pdflatex is only needed to regenerate it.
-  # ── paper retrieval from arXiv ───────────────────────────────────
-  # Search, PDF download, LaTeX e-print source. Declares no deps: it needs
-  # only `requests` from the base install. The modules live under
-  # tools/literature/ (a bundle is a grouping, not a directory -- cf. `bsm`
-  # over tools/analysis/), and that package defers its PDF imports, so an
-  # arxiv-only install imports and runs without pypdfium2.
+  # arXiv search, PDF download and e-print source; needs only the base install.
   arxiv: {}
-
-  # PDF -> TeX extraction, for the papers arXiv has no source for. Carries the
-  # arXiv tools too, since fetching a paper's source and reconstructing text
-  # from its PDF are two halves of one job; pypdfium2 is needed only for the
-  # second half.
+  # The arXiv tools plus TeX-faithful text extraction from PDFs.
   literature:
     deps: [pypdfium2>=4.30.0]
 
@@ -101,55 +117,75 @@ bundles:
     deps: [numpy>=2.3.5, tqdm>=4.67.0, pylhe>=1.0.2]
 
   # ── BSM / SUSY spectrum setup ────────────────────────────────────
-  # Pure python (no external HEP software): parse benchmark-point spectra
-  # and build Pythia decay-table fragments for BSM states the LHE leaves
-  # stable. The experimental model is carried by the inputs, not the tools.
+  # Benchmark-point spectra and Pythia decay tables for stable BSM states.
   bsm: {}
 
   # ── event generation ─────────────────────────────────────────────
-  # Pythia + Sherpa share heavy MC dependencies.
+  # pythia8mc is installed only where PyPI has a wheel (Linux x86_64, macOS
+  # 15+ arm64; Python 3.10-3.14); elsewhere the tools ask for pythia_path.
+  # Keep the marker string identical across bundles: toolbase deduplicates
+  # deps by exact string.
+  # sherpa-mc is commented out under the sherpa bundle: its wheels cover
+  # fewer platforms and no marker can test glibc. Uncomment it and reinstall
+  # on a platform that has one; otherwise set sherpa_path.
   event_gen:
     deps:
-      - pythia8mc>=8.316.0
-      - sherpa-mc>=3.0.3b1
+      - 'pythia8mc>=8.316.0; python_version < "3.15" and ((sys_platform == "linux" and platform_machine == "x86_64") or (sys_platform == "darwin" and platform_machine == "arm64" and platform_release >= "24"))'
       - pylhe>=1.0.2
+      - pyyaml>=6.0
       - numpy>=2.3.5
       - tqdm>=4.67.0
-  # Pythia-only subset of event_gen (no Sherpa/MadGraph), for workflows
-  # that just generate/shower events -- e.g. the LLP forward-flux
-  # generation that feeds the `llp` bundle.
+      - awkward>=2.8.0
+      - uproot>=5.7.0
+      - pyhepmc>=2.13
+  # Pythia through its Python interface, with the card validator, settings
+  # search, jets and the dataset writers.
   pythia:
     deps:
-      - pythia8mc>=8.316.0
+      - 'pythia8mc>=8.316.0; python_version < "3.15" and ((sys_platform == "linux" and platform_machine == "x86_64") or (sys_platform == "darwin" and platform_machine == "arm64" and platform_release >= "24"))'
       - numpy>=2.3.5
       - tqdm>=4.67.0
-  # MadGraph is split out: it needs a separate external install (mg5_path)
-  # and the Python wrapper has no heavy pip deps of its own (it subprocess
-  # invokes `bin/mg5_aMC`). Gated on mg5_path being configured. `six` is
-  # declared here because mg5_aMC's own python helpers import it at runtime,
-  # and MG5 runs under this toolkit's venv interpreter — without it the
-  # generation aborts ("madgraph requires the six module").
+      - awkward>=2.8.0
+      - uproot>=5.7.0
+      - pyhepmc>=2.13
+  # Sherpa through its Python interface (the wheel or a local build's module)
+  # and the C++ run-card tool, with the card validator and dataset writers.
+  sherpa:
+    deps:
+      # - sherpa-mc>=3.0.3b2
+      - pyyaml>=6.0
+      - numpy>=2.3.5
+      - tqdm>=4.67.0
+      - awkward>=2.8.0
+      - uproot>=5.7.0
+      - pyhepmc>=2.13
+  # C++ against a Pythia 8 or Sherpa install of your own: run-card drivers
+  # and agent-written main programs. No generator packages.
+  pythia_cpp:
+    requires: [pythia_path]
+    deps: [numpy>=2.3.5, tqdm>=4.67.0, awkward>=2.8.0, uproot>=5.7.0, pyhepmc>=2.13]
+  sherpa_cpp:
+    requires: [sherpa_path]
+    deps: [pyyaml>=6.0, numpy>=2.3.5, tqdm>=4.67.0, awkward>=2.8.0, uproot>=5.7.0, pyhepmc>=2.13]
+  # MadGraph through a local install; six is imported by mg5_aMC's own helpers.
   mg5:
     requires: [mg5_path]
     deps: [six]
 
   # ── long-lived-particle reach studies ────────────────────────────
-  # Pure python + numpy + yaml; no external HEP software and no config
-  # gating. The experimental setting (collider-forward vs beam-dump) is
-  # carried entirely by the kernel/geometry YAML inputs, not the tools.
   llp:
-    deps: [numpy>=2.3.5, pyyaml>=6.0]
+    deps: [numpy>=2.3.5, pyyaml>=6.0, awkward>=2.8.0, uproot>=5.7.0]
 
   # ── diagram analysis (NDA) ───────────────────────────────────────
+  processes:
+    deps: [feyngraph==0.1.0b4]
+  process_validation:
+    requires: [mg5_path]
+    deps: [feyngraph==0.1.0b4, six]
   nda:
-    deps: [feyngraph]                    # for EnumerateDiagramsTool, VisualizeDiagramsTool
+    deps: [feyngraph, numpy>=2.3.5]
 
   # ── generic Wolfram Language execution ───────────────────────────
-  # Runs arbitrary .wl scripts (or inline code) through wolframscript and
-  # parses the optional structured-result markers. Deliberately declares no
-  # pip deps: it is stdlib-only, loads no Wolfram packages, and knows nothing
-  # about what the scripts compute, so it installs on a bare environment.
-  # The eda and feynrules bundles are consumers, not prerequisites.
   wolfram:
     requires: [wolframscript_path]
 
@@ -158,35 +194,29 @@ bundles:
     requires: [wolframscript_path]
     deps: [sympy>=1.14.0]
 
-  # ── BSM model building: structured spec -> .fr ───────────────────
-  # Turn a validated FeynRulesModel spec into FeynRules source. No Mathematica
-  # needed; the .fr -> UFO step is the feynrules bundle below.
+  # ── BSM model building ───────────────────────────────────────────
+  # Structured spec -> FeynRules source.
   frgen:
-    deps: [jinja2>=3.1.0]                # pydantic comes via the orchestral base
-
-  # ── reading compiled UFO models ──────────────────────────────────
-  # Static, import-free inspection of a UFO directory: particles, parameters,
-  # couplings, vertices, gauge. Stdlib-only and deliberately NOT under
-  # feynrules -- a UFO is the format MadGraph consumes, FeynRules is only one
-  # producer of them, and reading one needs neither Mathematica nor a FeynRules
-  # install. Requiring either would deny the tool to anyone holding a UFO from
-  # somewhere else.
+    deps: [jinja2>=3.1.0]
+  # Static inspection of a UFO directory; needs no Mathematica or FeynRules.
   ufo: {}
-
-  # ── BSM model UFO generation via Mathematica/FeynRules ───────────
+  # .fr -> UFO through FeynRules.
   feynrules:
     requires: [feynrules_path, wolframscript_path]
 
-  # ── HepMC3 event-format bridge (evtjsonl <-> .hepmc) ─────────────
-  hepmc:
-    deps: [pyhepmc>=2.13]
+  # ── event datasets: conversion between ROOT, HepMC3 and JSONL ────
+  events:
+    deps: [awkward>=2.8.0, uproot>=5.7.0, pyhepmc>=2.13]
 
-  # ── Delphes fast detector simulation ─────────────────────────────
-  # Gated on a local Delphes build (needs ROOT). The ROOT-output
-  # flattener reads with uproot, so no PyROOT is required.
+  # ── Delphes fast detector simulation (a local build with ROOT) ──
   delphes:
     requires: [delphes_path]
     deps: [uproot>=5.0]
+
+  # ── Rivet: generator predictions against published measurements ──
+  rivet:
+    requires: [rivet_path]
+    deps: [pyyaml>=6.0, pyhepmc>=2.13, matplotlib>=3.8, numpy>=2.3.5]
 tools:
   - module: tools.analysis.conversions
     name: EventJSONLToNumpyTool
@@ -318,6 +348,18 @@ tools:
     name: LookupTheory
     description: Navigate the QFT theory knowledge base (Skills Graph).
     bundle: eda
+  - module: tools.feyngraph.catalogue_tools
+    name: InspectProcessModelTool
+    description: Inspect built-in FeynGraph SM or explicit UFO provenance and particles.
+    bundle: processes
+  - module: tools.feyngraph.catalogue_tools
+    name: EnumerateProcessesTool
+    description: Catalogue tree-level 1->N decays (any N >= 2) with stable IDs, FeynTable graphs and coupling classes.
+    bundle: processes
+  - module: tools.feyngraph.catalogue_tools
+    name: ValidateProcessCatalogueTool
+    description: Independently check a 1->N catalogue with MG5 diagram generation; no rate integration.
+    bundle: process_validation
   - module: tools.feyngraph.enumerate_tool
     name: EnumerateDiagramsTool
     description: Enumerate all Feynman diagrams for a process using FeynGraph.
@@ -352,6 +394,19 @@ tools:
       the right quantum numbers, and optionally that a partial width matches a
       closed-form expectation.
     bundle: feynrules
+  - module: tools.feynrules.feynarts_model
+    name: WriteFeynArtsModel
+    description: Write a FeynArts model from a FeynRules .fr model (Feynman or unitary
+      gauge) with a manifest of fields and couplings, and lint it -- it loads in
+      FeynCalc's FeynArts, every vertex of the same model's UFO has a FeynArts
+      coupling, and the ghosts and Goldstones match the gauge.
+    bundle: feynrules
+  - module: tools.feynrules.toy_model
+    name: WriteToyModel
+    description: Write a FeynRules .fr for a toy theory from a compact spec (fields with spin,
+      charge, colour, mass; couplings; interaction terms), with the gauge group, kinetic and
+      mass terms generated -- the model for a stated Lagrangian without writing FeynRules syntax.
+    bundle: [feynrules, frgen]
   - module: tools.ufo.inspect_tool
     name: InspectUFOTool
     description: Read a compiled UFO -- particles, parameters, couplings,
@@ -367,8 +422,9 @@ tools:
   - module: tools.jobs.jobs_tool
     name: SubmitJobTool
     description: Submit a slow heptapod tool (Lagrangian checks, UFO compile or
-      validation, MadGraph run) as a detached background job and get a job_id
-      back immediately.
+      validation, MadGraph run, squared amplitudes, rates, census) as a detached
+      background job and get a job_id back immediately; also runs many calls of
+      a tool in parallel without an agent per call.
     bundle: jobs
   - module: tools.jobs.jobs_tool
     name: JobStatusTool
@@ -394,9 +450,10 @@ tools:
     bundle: reverse
   - module: tools.literature.literature_tools
     name: ArxivSearchTool
-    description: Search arXiv for papers (arXiv ids, PDF links, abstracts).
-      Complements the INSPIRE tools, which cover HEP metadata and citations
-      but have no arXiv access.
+    description: Search arXiv for papers. Returns a compact list (versioned
+      id, title, authors, date, category) with every field, abstracts
+      included, in a results file. Complements the INSPIRE tools, which cover
+      HEP metadata and citations but have no arXiv access.
     bundle: [arxiv, literature]
   - module: tools.literature.literature_tools
     name: ArxivSourceTool
@@ -407,15 +464,23 @@ tools:
   - module: tools.literature.literature_tools
     name: ArxivPDFTool
     description: Download an arXiv paper's PDF into the sandbox, for papers
-      arXiv has no e-print source for. Lands in <output_dir>/<arxiv_id>/
-      alongside anything ArxivSourceTool fetched for the same paper.
+      arXiv has no e-print source for. Lands in <output_dir>/<arxiv_id>v<N>/
+      alongside anything ArxivSourceTool fetched for the same version.
     bundle: [arxiv, literature]
   - module: tools.literature.pdf_to_tex_tool
     name: PDFToTeXTool
     description: Extract TeX-flavoured text from a LaTeX-produced PDF,
       recovering symbols, sub/superscripts, fractions and radicals as TeX
-      macros. Writes to a file and returns a summary.
+      macros. Writes to a file with a '%% page N' line before each page and
+      returns a JSON summary with the PDF's sha256.
     bundle: literature
+  - module: tools.literature.quote_tool
+    name: QuoteSourceTool
+    description: Find a statement in a fetched paper (versioned arXiv id or a
+      path to its source or PDFToTeX output) and return it verbatim with a
+      locator -- file, sha256, lines, characters, section, equation/table
+      label, page -- for citing evidence.
+    bundle: [arxiv, literature]
   - module: tools.inspire.inspire_tools
     name: InspireAuthorTool
     description: Get information about a physicist and their publication
@@ -461,6 +526,24 @@ tools:
     name: InspireSearchTool
     description: Search INSPIRE HEP for physics papers.
     bundle: inspire
+  - module: tools.hepdata.hepdata_tools
+    name: HEPDataSearchTool
+    description: Search HEPData for the data records of publications (limits,
+      yields, efficiencies, likelihood inputs); each hit gives its INSPIRE id,
+      record version and table count, with the table titles in a results file.
+    bundle: hepdata
+  - module: tools.hepdata.hepdata_tools
+    name: HEPDataRecordTool
+    description: Fetch one HEPData record by INSPIRE id at a version -- its
+      metadata, resources and every table's name, DOI and description.
+    bundle: hepdata
+  - module: tools.hepdata.hepdata_tools
+    name: HEPDataTableTool
+    description: Fetch one HEPData table at a pinned record version, save it as
+      YAML in the sandbox and return its headers and first rows, with every
+      column and its uncertainties in a results file, cited as
+      HEPData:ins<id>/v<N>/<table> with the YAML's sha256.
+    bundle: hepdata
   - module: tools.llp.production_spectrum
     name: ProductionSpectrumTool
     description: Compute the parent-rest-frame LLP energy spectrum f_h(x) AND
@@ -522,6 +605,16 @@ tools:
     description: Estimates branching ratios using NDA for multiple diagram
       classes.
     bundle: nda
+  - module: tools.nda.census_tool
+    name: EstimateCatalogueNDATool
+    description: NDA width estimates for every process of a decay census
+      (EnumerateProcesses output), one rerunnable EstimateDecayWidthNDA request
+      per diagram, combined per channel and coupling class, each with its
+      evaluated expression; with lower-multiplicity outputs, soft-collinear
+      estimates for external photons and gluons (pair-mass regulator),
+      collinear-splitting estimates for a photon or gluon into a massive pair,
+      and sequential narrow-width estimates for zero-width on-shell lines.
+    bundle: nda
   - module: tools.nda.compare_phase_space
     name: ComparePhaseSpaceTool
     description: Compares n-body phase space volumes across different final
@@ -544,7 +637,8 @@ tools:
     bundle: nda
   - module: tools.nda.phase_space
     name: EstimatePhaseSpaceTool
-    description: Estimates n-body phase space volume for massless final states.
+    description: Estimates n-body phase space volume (massive when final-state
+      masses are given).
     bundle: nda
   - module: tools.pdg.pdg_tool
     name: PDGDatabaseTool
@@ -558,20 +652,66 @@ tools:
     name: PDGSearchTool
     description: Search the PDG database for particles matching a query.
     bundle: pdg
-  - module: tools.pythia.pythia
+  - module: tools.pythia.jets
     name: JetClusterSlowJetTool
     description: Cluster jets with Pythia8.SlowJet for a single event.
     bundle: [event_gen, pythia]
-  - module: tools.pythia.pythia
+  - module: tools.pythia.generate
     name: PythiaFromRunCardTool
-    description: Generate hadron-level events using Pythia8 driven by a provided
-      .cmnd run card.
+    description: Generate hadron-level events with Pythia 8 from a .cmnd run
+      card, through Pythia's Python interface (the pythia8mc wheel, or a
+      local build's pythia8 extension).
     bundle: [event_gen, pythia]
-  - module: tools.sherpa.sherpa
+  - module: tools.pythia.generate
+    name: PythiaCPPFromRunCardTool
+    description: Generate hadron-level events with Pythia 8 from a .cmnd run
+      card, through a C++ driver compiled against the Pythia 8 install named
+      by pythia_path; same inputs and dataset as PythiaFromRunCardTool, for
+      any Pythia version and build.
+    bundle: pythia_cpp
+  - module: tools.pythia.search
+    name: PythiaSettingsSearchTool
+    description: Search Pythia8's ~2000 run-card settings by name, physics term,
+      or topic, with type, default, and allowed range.
+    bundle: [event_gen, pythia, pythia_cpp]
+  - module: tools.pythia.validate
+    name: ValidatePythiaRunCardTool
+    description: Validate a Pythia8 .cmnd run card before generating events -
+      unknown settings, bad values, and LHE-showering requirements.
+    bundle: [event_gen, pythia, pythia_cpp]
+  - module: tools.sherpa.generate
     name: SherpaFromRunCardTool
-    description: Generate hadron-level events using Sherpa3 driven by a provided
-      .yaml run card.
-    bundle: event_gen
+    description: Generate hadron-level events with Sherpa 3 from a .yaml run
+      card into a ROOT, HepMC3 or JSONL dataset, or straight into Rivet,
+      through Sherpa's Python interface (the sherpa-mc wheel, or a local
+      build's module); nominal weight only.
+    bundle: [event_gen, sherpa]
+  - module: tools.sherpa.generate
+    name: SherpaCPPFromRunCardTool
+    description: Generate hadron-level events with Sherpa 3 from a .yaml run
+      card through a C++ driver compiled against a Sherpa install
+      (sherpa_path, or the sherpa-mc wheel's own libraries); same inputs
+      and dataset as SherpaFromRunCardTool, plus the card's weight
+      variations as named weights.
+    bundle: [event_gen, sherpa, sherpa_cpp]
+  - module: tools.sherpa.validate
+    name: ValidateSherpaRunCardTool
+    description: Validate a Sherpa 3 .yaml run card before generating -
+      unknown or misspelt settings, the shape of beams and processes, and a
+      dry initialisation that reports Sherpa's own errors.
+    bundle: [event_gen, sherpa, sherpa_cpp]
+  - module: tools.cpp.program
+    name: PythiaCPPFromProgramTool
+    description: Compile an agent-written C++ main program against the Pythia
+      8 install named by pythia_path and run it in the sandbox, for what a
+      run card cannot express (UserHooks, custom vetoes, plugins).
+    bundle: pythia_cpp
+  - module: tools.cpp.program
+    name: SherpaCPPFromProgramTool
+    description: Compile an agent-written C++ main program against a Sherpa
+      install (sherpa_path, or the sherpa-mc wheel's own libraries) and run
+      it in the sandbox, for direct use of the Sherpa API.
+    bundle: [sherpa, sherpa_cpp]
   - module: tools.units.metric_prefix_converter
     name: MetricPrefixConverter
     description: Convert between SI metric prefixes for the same base unit.
@@ -580,15 +720,12 @@ tools:
     name: NaturalUnitsConverter
     description: Convert between natural units (ℏ=c=1) and SI units.
     bundle: units
-  - module: tools.hepmc.hepmc
-    name: JSONLToHepMCTool
-    description: Convert evtjsonl-1.0 events into a HepMC3 ASCII file
-      (the input format Delphes consumes).
-    bundle: hepmc
-  - module: tools.hepmc.hepmc
-    name: HepMCToJSONLTool
-    description: Convert a HepMC3 ASCII file into the evtjsonl-1.0 schema.
-    bundle: hepmc
+  - module: tools.events.convert
+    name: ConvertEventsTool
+    description: Convert an event dataset between ROOT, HepMC3 and JSONL,
+      e.g. to HepMC3 for Delphes or Rivet, with the run's beams, weights and
+      cross section.
+    bundle: [events, event_gen, pythia]
   - module: tools.delphes.delphes
     name: DelphesFromHepMCTool
     description: Run Delphes fast detector simulation on a HepMC3 event
@@ -599,3 +736,31 @@ tools:
     description: Flatten Delphes ROOT output (jets, electrons, muons,
       photons, MET) into reco-level JSONL via uproot.
     bundle: delphes
+  - module: tools.rivet.analyses
+    name: RivetFindAnalysesTool
+    description: Search Rivet's ~2000 analyses by measurement, experiment,
+      beams and energy, or describe one (what to generate, its options,
+      histograms and references).
+    bundle: rivet
+  - module: tools.rivet.run
+    name: RunRivetTool
+    description: Run Rivet analyses on a HepMC3 event file, after checking
+      the analyses exist and match the events' beams and energy; writes
+      YODA histograms and reports what was filled.
+    bundle: rivet
+  - module: tools.rivet.compare
+    name: RivetCompareTool
+    description: Compare a Rivet run's histograms with the published data
+      bin by bin -- chi2, p-values, pulls and prediction/data ratios.
+    bundle: rivet
+  - module: tools.rivet.plot
+    name: RivetPlotTool
+    description: Plot Rivet histograms against the measured data in Rivet's
+      layout (data points, stepped predictions, variation bands, ratio
+      panel), with an HTML gallery.
+    bundle: rivet
+  - module: tools.rivet.merge
+    name: RivetMergeTool
+    description: Merge the YODA outputs of independent Rivet runs (different
+      seeds or processes) with rivet-merge.
+    bundle: rivet

@@ -11,6 +11,7 @@ assertion is checked against known ground truth rather than against whatever a
 sample document happens to contain. Tests skip if pdflatex is unavailable.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -242,8 +243,9 @@ class TestTool:
             pytest.skip("pdflatex failed")
         out = self._run(tmp_path, pdf_path="doc.pdf", output_path="out.tex")
         assert (tmp_path / "out.tex").exists()
-        assert "out.tex" in out
-        assert "TeX macros" in out
+        res = json.loads(out)
+        assert res["output_path"] == "out.tex" and res["tex_macros"] > 0
+        assert (tmp_path / "out.tex").read_text().startswith("%% page 1\n")
         # the body must not be echoed back into the agent's context
         assert r"\frac{1}{4}" not in out
 

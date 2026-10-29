@@ -21,8 +21,82 @@ from orchestral.tools.base.field_utils import RuntimeField, StateField
 from .inspire_interface import InspireInterface
 from .query_builder import QueryBuilder
 from .library import InspireLibrary
+from ..digest import clip, digest
+from ..provenance import attach, inspire_source_id, record_call
 
 SCHEMA_VERSION = "inspire-hep-1.0"
+INSPIRE_API = {"name": "INSPIRE-HEP REST API", "version": "v1"}
+_MAX_SOURCE_IDS = 200
+
+
+def _inspire_records(data, out):
+    """Collect (recid, revision, updated, collection) from INSPIRE JSON.
+
+    A record is any dict with a ``metadata`` object carrying a
+    ``control_number``; search responses nest them under ``hits.hits``.
+    """
+    if isinstance(data, dict):
+        md = data.get("metadata")
+        if isinstance(md, dict) and md.get("control_number") is not None:
+            schema = str(md.get("$schema", ""))
+            coll = schema.rsplit("/", 1)[-1].replace(".json", "") if schema else "hep"
+            coll = "literature" if coll in ("hep", "") else coll
+            out.append((md["control_number"], data.get("revision_id"),
+                        data.get("updated"), coll))
+        for v in data.values():
+            if isinstance(v, (dict, list)):
+                _inspire_records(v, out)
+    elif isinstance(data, list):
+        for v in data:
+            _inspire_records(v, out)
+    return out
+
+
+class _InspireProvenance:
+    """Wraps each INSPIRE tool's ``_execute`` so its JSON result carries a
+    ``provenance`` block and the call is logged under research/.
+
+    The exact request URLs (with parameters), cache hits and the time a
+    cached response was originally fetched come from the interface's
+    ``call_log``; the raw API responses are saved verbatim. A tool that
+    defines ``_digest(result, prov)`` returns that instead of the full result.
+    """
+
+    def _run(self) -> str:
+        iface = getattr(self, "_interface", None)
+        if iface is not None:
+            iface.call_log = []
+        out = self._execute()
+        log = list(getattr(iface, "call_log", []) or [])
+        records = []
+        for c in log:
+            _inspire_records(c.get("data"), records)
+        source_ids = [inspire_source_id(r, rev, upd, coll) for r, rev, upd, coll in records]
+        request = {k: getattr(self, k) for k in type(self).model_fields
+                   if k not in BaseTool.model_fields
+                   and k not in ("base_directory", "cache_enabled")}
+        if len(log) > 1:
+            request["http_requests"] = [
+                {"url": c["url"], "from_cache": c["from_cache"]} for c in log
+            ]
+        cached = [c["cached_at"] for c in log if c.get("from_cache")]
+        raw = [c.get("data") for c in log] if len(log) != 1 else log[0].get("data")
+        prov = record_call(
+            self.base_directory,
+            type(self).__name__.removesuffix("Tool"),
+            request,
+            out,
+            request_url=log[0]["url"] if log else None,
+            api=INSPIRE_API if log else {"name": "local library", "version": None},
+            from_cache=bool(log) and all(c.get("from_cache") for c in log),
+            cached_at=min(cached) if cached else None,
+            source_ids=source_ids[:_MAX_SOURCE_IDS],
+            raw=raw if log else None,
+            raw_ext="bib" if log and isinstance(raw, str) else "json",
+        )
+        if hasattr(self, "_digest"):
+            return self._digest(out, prov)
+        return attach(out, prov)
 
 def _inspire_interface(base_directory: str, cache_enabled: bool) -> "InspireInterface":
     """Construct an InspireInterface with cache_file resolved against
@@ -42,7 +116,7 @@ def _inspire_interface(base_directory: str, cache_enabled: bool) -> "InspireInte
 # ==================== Literature Tools ==================== #
 
 
-class InspireSearchTool(BaseTool):
+class InspireSearchTool(_InspireProvenance, BaseTool):
     """
     Search INSPIRE HEP for physics papers.
 
@@ -59,26 +133,37 @@ class InspireSearchTool(BaseTool):
         sort: How to sort results ("mostrecent", "mostcited")
         size: Number of results (default 10, max 100)
 
-    Returns JSON with:
+    Returns a JSON digest:
         {
             "status": "ok",
             "schema": "inspire-hep-1.0",
             "total": 1234,
+            "returned": 10,
+            "query_info": {"original": "papers by Witten", "spires": "a witten",
+                           "sort": "mostcited", "size": 10},
+            "results_path": "research/results/<call_id>.json",
             "papers": [
                 {
                     "recid": "451647",
-                    "title": "String theory dynamics...",
-                    "authors": ["Witten, Edward"],
-                    "citation_count": 3500,
                     "arxiv_id": "hep-th/9503124",
-                    ...
+                    "title": "String theory dynamics...",
+                    "first_author": "Witten, Edward",
+                    "year": 1995,
+                    "citation_count": 3500
                 }
             ],
-            "query_info": {
-                "original": "papers by Witten",
-                "spires": "a witten"
-            }
+            "omitted": 0,
+            "note": "...",
+            "provenance": {...}
         }
+
+    Titles are cut to 150 characters; "first_author" is the collaboration
+    when the paper has one, with "et al." when there are more authors;
+    "year" is the publication year, else the year of the earliest date. The
+    file at results_path holds every paper in full (authors, abstract, DOI,
+    publication info, keywords, ...). "omitted" (present only when non-zero)
+    counts papers left out of the digest to keep it short; they are in the
+    file. InspirePaperTool fetches one paper's details.
     """
 
     # ======================== Runtime fields ======================== #
@@ -115,7 +200,7 @@ class InspireSearchTool(BaseTool):
         )
         self._query_builder = QueryBuilder()
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         """Execute search and return JSON result."""
         try:
             # Convert natural language to SPIRES query
@@ -150,8 +235,37 @@ class InspireSearchTool(BaseTool):
                 "query": self.query
             }, indent=2)
 
+    def _digest(self, out: str, prov: dict) -> str:
+        """Compact paper list; the full result goes to research/results/."""
+        result = json.loads(out)
+        if result.get("status") != "ok":
+            return attach(result, prov)
+        papers = []
+        for p in result["papers"]:
+            authors = p.get("authors") or []
+            collab = p.get("collaborations") or []
+            if collab:
+                first = collab[0] + (" Collaboration" if "ollaboration" not in collab[0] else "")
+            elif authors:
+                first = authors[0] + (" et al." if len(authors) > 1 else "")
+            else:
+                first = None
+            year = p.get("year")
+            if not year and str(p.get("date") or "")[:4].isdigit():
+                year = int(str(p["date"])[:4])
+            papers.append({
+                "recid": p.get("recid"),
+                "arxiv_id": p.get("arxiv_id"),
+                "title": clip(p.get("title"), 150),
+                "first_author": clip(first, 80),
+                "year": year,
+                "citation_count": p.get("citation_count"),
+            })
+        head = {k: result[k] for k in ("status", "schema", "total", "returned", "query_info")}
+        return digest(self.base_directory, result, prov, head, "papers", papers, what="papers")
 
-class InspirePaperTool(BaseTool):
+
+class InspirePaperTool(_InspireProvenance, BaseTool):
     """
     Get detailed information about a specific INSPIRE paper.
 
@@ -196,7 +310,7 @@ class InspirePaperTool(BaseTool):
         """Initialize INSPIRE interface (and any helpers)."""
         self._interface = _inspire_interface(self.base_directory, self.cache_enabled)
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         """Get paper details."""
         try:
             paper = self._interface.get_paper(self.recid)
@@ -236,7 +350,7 @@ class InspirePaperTool(BaseTool):
             }, indent=2)
 
 
-class InspireCitationTool(BaseTool):
+class InspireCitationTool(_InspireProvenance, BaseTool):
     """
     Analyze citations for a paper.
 
@@ -282,7 +396,7 @@ class InspireCitationTool(BaseTool):
         """Initialize INSPIRE interface (and any helpers)."""
         self._interface = _inspire_interface(self.base_directory, self.cache_enabled)
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         try:
             # Get paper info first
             paper = self._interface.get_paper(self.recid)
@@ -374,7 +488,7 @@ class InspireCitationTool(BaseTool):
             }, indent=2)
 
 
-class InspireBibTeXTool(BaseTool):
+class InspireBibTeXTool(_InspireProvenance, BaseTool):
     """
     Get BibTeX entry for a paper.
 
@@ -404,7 +518,7 @@ class InspireBibTeXTool(BaseTool):
         """Initialize INSPIRE interface (and any helpers)."""
         self._interface = _inspire_interface(self.base_directory, self.cache_enabled)
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         try:
             bibtex = self._interface.get_bibtex(self.recid)
 
@@ -427,7 +541,7 @@ class InspireBibTeXTool(BaseTool):
 # ==================== People & Institutions Tools ==================== #
 
 
-class InspireAuthorTool(BaseTool):
+class InspireAuthorTool(_InspireProvenance, BaseTool):
     """
     Get information about a physicist and their publication history.
 
@@ -472,7 +586,7 @@ class InspireAuthorTool(BaseTool):
         """Initialize INSPIRE interface (and any helpers)."""
         self._interface = _inspire_interface(self.base_directory, self.cache_enabled)
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         try:
             # Search for author
             authors = self._interface.search_authors(self.author, size=1)
@@ -512,7 +626,7 @@ class InspireAuthorTool(BaseTool):
             }, indent=2)
 
 
-class InspireInstitutionTool(BaseTool):
+class InspireInstitutionTool(_InspireProvenance, BaseTool):
     """
     Search for physics institutions.
 
@@ -547,7 +661,7 @@ class InspireInstitutionTool(BaseTool):
         """Initialize INSPIRE interface (and any helpers)."""
         self._interface = _inspire_interface(self.base_directory, self.cache_enabled)
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         try:
             institutions = self._interface.search_institutions(
                 self.query,
@@ -574,7 +688,7 @@ class InspireInstitutionTool(BaseTool):
 # ==================== Events & Publications Tools ==================== #
 
 
-class InspireConferenceTool(BaseTool):
+class InspireConferenceTool(_InspireProvenance, BaseTool):
     """
     Search for physics conferences and seminars.
 
@@ -614,7 +728,7 @@ class InspireConferenceTool(BaseTool):
         """Initialize INSPIRE interface (and any helpers)."""
         self._interface = _inspire_interface(self.base_directory, self.cache_enabled)
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         try:
             conferences = self._interface.search_conferences(
                 self.query,
@@ -639,7 +753,7 @@ class InspireConferenceTool(BaseTool):
             }, indent=2)
 
 
-class InspireJournalTool(BaseTool):
+class InspireJournalTool(_InspireProvenance, BaseTool):
     """
     Search for physics journals.
 
@@ -674,7 +788,7 @@ class InspireJournalTool(BaseTool):
         """Initialize INSPIRE interface (and any helpers)."""
         self._interface = _inspire_interface(self.base_directory, self.cache_enabled)
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         try:
             journals = self._interface.search_journals(
                 self.query,
@@ -698,7 +812,7 @@ class InspireJournalTool(BaseTool):
             }, indent=2)
 
 
-class InspireExperimentTool(BaseTool):
+class InspireExperimentTool(_InspireProvenance, BaseTool):
     """
     Search for physics experiments.
 
@@ -733,7 +847,7 @@ class InspireExperimentTool(BaseTool):
         """Initialize INSPIRE interface (and any helpers)."""
         self._interface = _inspire_interface(self.base_directory, self.cache_enabled)
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         try:
             experiments = self._interface.search_experiments(
                 self.query,
@@ -760,7 +874,7 @@ class InspireExperimentTool(BaseTool):
 # ==================== Library Tools ==================== #
 
 
-class InspireReadingListTool(BaseTool):
+class InspireReadingListTool(_InspireProvenance, BaseTool):
     """
     Manage your personal reading list of INSPIRE papers.
 
@@ -816,7 +930,8 @@ class InspireReadingListTool(BaseTool):
         self._interface = _inspire_interface(self.base_directory, self.cache_enabled)
         library_file = os.path.join(self.base_directory, ".inspire_library.json")
         self._library = InspireLibrary(library_file)
-    def _run(self) -> str:
+
+    def _execute(self) -> str:
         try:
             action = self.action.lower()
 
@@ -917,7 +1032,7 @@ class InspireReadingListTool(BaseTool):
             }, indent=2)
 
 
-class InspireNotesTool(BaseTool):
+class InspireNotesTool(_InspireProvenance, BaseTool):
     """
     Manage notes on INSPIRE papers.
 
@@ -964,7 +1079,7 @@ class InspireNotesTool(BaseTool):
         library_file = os.path.join(self.base_directory, ".inspire_library.json")
         self._library = InspireLibrary(library_file)
 
-    def _run(self) -> str:
+    def _execute(self) -> str:
         try:
             action = self.action.lower()
 

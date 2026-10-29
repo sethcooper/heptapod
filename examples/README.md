@@ -8,6 +8,7 @@ These examples support coding-agent workflows through toolbase and standalone AP
 | [EDA](eda/) | Exact symbolic amplitude calculations |
 | [NDA](nda/) | Diagram enumeration and dimensional estimates |
 | [Leptoquark simulation](sim/s1_lq_rr/) | Monte Carlo event generation and analysis |
+| [Lagrangian extraction](lagrangian_extraction/) | Paper to a checked BSM model: a FeynRules model written from a paper, validated, and independently re-read |
 
 ## API and provider configuration
 

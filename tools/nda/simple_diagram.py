@@ -152,12 +152,23 @@ class Vertex:
     structures: Optional[List[str]] = None
     #: Which external legs form each bilinear, e.g. [[0, 2], [1, 3]].
     pairing: Optional[List[List[int]]] = None
+    #: Optional connectivity: the lines meeting here, as "in:0", "out:<i>"
+    #: (index into final) and "prop:<j>" (index into propagators).
+    legs: Optional[List[str]] = None
+    #: Mass dimension of the coupling (1 for a trilinear scalar or a
+    #: scalar-vector-vector vertex); it is made dimensionless with the
+    #: decaying particle's mass.
+    coupling_dimension: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         result = {"type": self.type, "coupling": self.coupling}
         if self.fields:
             result["fields"] = self.fields
+        if self.legs:
+            result["legs"] = self.legs
+        if self.coupling_dimension:
+            result["coupling_dimension"] = self.coupling_dimension
         return result
 
 
@@ -170,6 +181,12 @@ class Propagator:
     spin: Optional[float] = None  # Spin for spin-dependent propagator factors (Table 1 of arXiv:1402.1178)
     regime: str = "auto"  # auto, heavy, light, intermediate
     is_loop_propagator: bool = False
+    #: Optional: indices of the final-state particles this line produces
+    #: (its momentum is their sum), which fixes its allowed virtuality.
+    final_legs: Optional[List[int]] = None
+    #: Optional: colour factor of this line's decay into final_legs, used to
+    #: split the diagram's colour factor in the narrow-width approximation.
+    decay_color_factor: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -184,6 +201,10 @@ class Propagator:
             result["spin"] = self.spin
         if self.is_loop_propagator:
             result["is_loop_propagator"] = True
+        if self.final_legs is not None:
+            result["final_legs"] = self.final_legs
+        if self.decay_color_factor is not None:
+            result["decay_color_factor"] = self.decay_color_factor
         return result
 
 
@@ -203,6 +224,9 @@ class Diagram:
     color_factor: float = 1.0
     energy_scale: Optional[float] = None  # Override scale (default: mother mass)
     symmetry_factor: Optional[int] = None  # Override identical-particle factor
+    #: False when conservation was established upstream (e.g. a census built
+    #: from the model's own vertices), where label-based lookups do not apply.
+    check_quantum_numbers: bool = True
 
     def to_dict(self, compact: bool = False) -> Dict[str, Any]:
         """Convert to dictionary format.
@@ -227,9 +251,11 @@ class Diagram:
             result["energy_scale"] = self.energy_scale
         if self.symmetry_factor is not None:
             result["symmetry_factor"] = self.symmetry_factor
+        if not self.check_quantum_numbers:
+            result["check_quantum_numbers"] = False
         return result
 
-    def validate(self, check_quantum_numbers: bool = True) -> tuple[bool, List[str]]:
+    def validate(self, check_quantum_numbers: Optional[bool] = None) -> tuple[bool, List[str]]:
         """
         Validate diagram for physical consistency.
 
@@ -240,6 +266,8 @@ class Diagram:
             (is_valid, list_of_warnings)
         """
         warnings = []
+        if check_quantum_numbers is None:
+            check_quantum_numbers = self.check_quantum_numbers
 
         # Validate topology
         is_valid, msg = validate_topology(self.to_dict(), self.topology)
@@ -327,7 +355,9 @@ def parse_vertex(vertex_dict: Dict[str, Any]) -> Vertex:
     return Vertex(
         type=vertex_dict["type"],
         coupling=vertex_dict.get("coupling", 1.0),
-        fields=vertex_dict.get("fields")
+        fields=vertex_dict.get("fields"),
+        legs=vertex_dict.get("legs"),
+        coupling_dimension=int(vertex_dict.get("coupling_dimension", 0)),
     )
 
 
@@ -353,7 +383,9 @@ def parse_propagator(prop_dict: Dict[str, Any]) -> Propagator:
         width=prop_dict.get("width"),
         spin=spin,
         regime=prop_dict.get("regime", "auto"),
-        is_loop_propagator=prop_dict.get("is_loop_propagator", False)
+        is_loop_propagator=prop_dict.get("is_loop_propagator", False),
+        final_legs=prop_dict.get("final_legs"),
+        decay_color_factor=prop_dict.get("decay_color_factor"),
     )
 
 
@@ -444,6 +476,7 @@ def parse_diagram(diagram_dict: Dict[str, Any]) -> Diagram:
         color_factor=color_factor,
         energy_scale=energy_scale,
         symmetry_factor=symmetry_factor,
+        check_quantum_numbers=bool(diagram_dict.get("check_quantum_numbers", True)),
     )
 
 

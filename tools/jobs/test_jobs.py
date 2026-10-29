@@ -187,7 +187,7 @@ def test_submit_rejections() -> bool:
     base = _base()
     ok = True
     r = SubmitJobTool(base_directory=base, tool_name="nope", tool_args="{}")._run()
-    ok &= r.startswith("Error:") and "whitelist" in r
+    ok &= r.startswith("Error:") and "not submittable" in r and "call it directly" in r
     r = SubmitJobTool(base_directory=base, tool_name="audittrail", tool_args="[1,2]")._run()
     ok &= r.startswith("Error:")
     r = SubmitJobTool(base_directory=base, tool_name="audittrail", tool_args="not json")._run()

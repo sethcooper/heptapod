@@ -68,6 +68,19 @@ feynrules_path = "/path/to/FeynRules"
 # Example (Linux): "/usr/local/bin/wolframscript"
 wolframscript_path = "/path/to/wolframscript"
 
+# Local Pythia 8 / Sherpa install prefixes (optional). When set, the Pythia
+# and Sherpa run-card tools drive these installs through a C++ driver
+# compiled against them instead of the pythia8mc / sherpa-mc wheels.
+# pythia_path holds bin/pythia8-config; sherpa_path holds bin/Sherpa-config.
+pythia_path = "/path/to/pythia"
+sherpa_path = "/path/to/Sherpa"
+
 # MadGraph5_aMC PATH.
 # Example: "/path/to/MG5_aMC_v3.6.6"
 mg5_path = "/path/to/MG5_aMC"
+
+# Rivet installation prefix (the directory holding bin/rivet-config), for the
+# rivet bundle. A conda-forge environment works:
+#   conda create -n rivet -c conda-forge rivet
+# Example: "/opt/miniconda3/envs/rivet"
+rivet_path = "/path/to/rivet"

@@ -15,15 +15,28 @@ agent needs to identify and extract a BSM Lagrangian.
 import hashlib
 import json
 import os
-from typing import List, Optional
+import secrets
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from orchestral.tools.base.tool import BaseTool
 from orchestral.tools.base.field_utils import RuntimeField, StateField
 
 from .arxiv_interface import (
     ArxivInterface,
+    arxiv_id_from_url,
     is_allowed_pdf_url,
+    split_version,
     validate_arxiv_id,
+    version_from_response,
+)
+from ..digest import clip, digest
+from ..provenance import (
+    arxiv_source_id,
+    attach,
+    file_entry,
+    now_iso,
+    record_call,
 )
 from .source_archive import (
     detect_payload,
@@ -34,7 +47,11 @@ from .source_archive import (
     strip_comments,
 )
 
-SCHEMA_VERSION = "literature-1.2"
+SCHEMA_VERSION = "literature-1.3"
+ARXIV_API = {"name": "arXiv", "version": None}
+
+#: Per-paper record of what was fetched, from where, when, with which hash.
+RETRIEVAL_FILE = "retrieval.json"
 
 _SEARCH_SORT_BY = {"relevance", "submittedDate", "lastUpdatedDate"}
 _SEARCH_SORT_ORDER = {"ascending", "descending"}
@@ -97,6 +114,65 @@ def _sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
+
+
+def _flat(arxiv_id: str) -> str:
+    """Filesystem-safe form of an arXiv id (old-style ids contain a slash)."""
+    return arxiv_id.replace("/", "_").replace("\\", "_")
+
+
+def _read_meta(paper_dir: str) -> Dict[str, Any]:
+    try:
+        with open(os.path.join(paper_dir, RETRIEVAL_FILE), encoding="utf-8") as fh:
+            meta = json.load(fh)
+        return meta if isinstance(meta, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_meta(paper_dir: str, source_id: Optional[str], kind: str, entry: Dict[str, Any]) -> None:
+    meta = _read_meta(paper_dir)
+    if source_id:
+        meta["source_id"] = source_id
+    meta[kind] = entry
+    try:
+        with open(os.path.join(paper_dir, RETRIEVAL_FILE), "w", encoding="utf-8") as fh:
+            json.dump(meta, fh, indent=2)
+    except OSError:
+        pass
+
+
+def _mtime_iso(path: str) -> str:
+    return now_iso(datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc))
+
+
+def _resolve(interface: ArxivInterface, arxiv_id: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """``(versioned_id, metadata_request_url, error)`` for an arXiv id.
+
+    "Latest" is pinned to a concrete vN BEFORE any cache lookup, so a cached
+    copy of v1 is never served for a paper that has since gained a v2.
+    """
+    try:
+        res = interface.resolve_version(arxiv_id)
+        return res["versioned_id"], res["request_url"], None
+    except Exception as e:  # noqa: BLE001 - network, parse, or no version
+        return None, None, str(e)
+
+
+def _with_provenance(
+    base_directory: str,
+    tool: str,
+    request: Dict[str, Any],
+    result: Dict[str, Any],
+    http: List[str],
+    **kw: Any,
+) -> str:
+    if len(http) > 1:
+        request = dict(request, http_requests=list(http))
+    prov = record_call(base_directory, tool, request, result, api=ARXIV_API, **kw)
+    return attach(result, prov)
+
+
 # ============================ Search ============================ #
 
 
@@ -120,10 +196,23 @@ class ArxivSearchTool(BaseTool):
         sort_by: "relevance", "submittedDate", or "lastUpdatedDate".
         sort_order: "descending" or "ascending".
 
-    Returns JSON:
-        {"status": "ok", "schema": "literature-1.0", "query": "...",
-         "count": N, "papers": [{"arxiv_id","title","authors","abstract",
-         "categories","doi","published","updated","pdf_url","abs_url"}, ...]}
+    Returns a JSON digest:
+        {"status": "ok", "schema": "literature-1.3", "query": "...",
+         "request_url": "...", "count": N,
+         "results_path": "research/results/<call_id>.json",
+         "papers": [{"id": "2103.02708v2", "title", "authors", "published",
+                     "category"}, ...],
+         "omitted": N, "note", "provenance": {...}}
+
+        ``id`` is versioned: the version the metadata describes (the latest
+        at query time). Titles are cut to 150 characters; ``authors`` is the
+        first author, or the first two, with "et al." when there are more;
+        ``category`` is the primary category. The file at results_path holds
+        every paper in full: {"arxiv_id", "version", "versioned_id",
+        "source_id" ("arXiv:<id>v<N>"), "title", "authors", "abstract",
+        "categories", "doi", "published", "updated", "pdf_url", "abs_url"}.
+        ``omitted`` (present only when non-zero) counts papers left out of
+        the digest to keep it short; they are in the file.
     """
 
     # ======================== Runtime fields ======================== #
@@ -207,17 +296,44 @@ class ArxivSearchTool(BaseTool):
                 suggestion="Check the query syntax or retry (arXiv may be rate-limiting)",
             )
 
-        return json.dumps(
-            {
-                "status": "ok",
-                "schema": SCHEMA_VERSION,
-                "query": query,
-                "request_url": url,
-                "count": len(papers),
-                "papers": papers,
-            },
-            indent=2,
+        result = {
+            "status": "ok",
+            "schema": SCHEMA_VERSION,
+            "query": query,
+            "request_url": url,
+            "count": len(papers),
+            "papers": papers,
+        }
+        prov = record_call(
+            self.base_directory,
+            "ArxivSearch",
+            {"query": query, "max_results": max_results, "sort_by": sort_by,
+             "sort_order": sort_order},
+            result,
+            api=ARXIV_API,
+            request_url=url,
+            source_ids=[p.get("source_id") for p in papers],
+            raw=interface.last_raw,
+            raw_ext="xml",
         )
+        compact = [{
+            "id": p.get("versioned_id") or p.get("arxiv_id"),
+            "title": clip(p.get("title"), 150),
+            "authors": clip(_short_authors(p.get("authors") or []), 80),
+            "published": p.get("published"),
+            "category": (p.get("categories") or [None])[0],
+        } for p in papers]
+        head = {k: result[k] for k in ("status", "schema", "query", "request_url", "count")}
+        return digest(self.base_directory, result, prov, head, "papers", compact, what="papers")
+
+
+def _short_authors(authors: List[str]) -> Optional[str]:
+    """First author, first two, or the first two with "et al." for more."""
+    if not authors:
+        return None
+    if len(authors) <= 2:
+        return " and ".join(authors)
+    return f"{authors[0]}, {authors[1]} et al."
 
 
 # ========================= PDF retrieval ======================== #
@@ -228,29 +344,34 @@ class ArxivPDFTool(BaseTool):
     Download an arXiv paper PDF into the sandbox for later text extraction.
 
     Input:
-        arxiv_id: arXiv identifier, e.g. "2103.02708" (version suffix optional;
-                  an explicit version is preserved, else the latest is fetched).
+        arxiv_id: arXiv identifier, e.g. "2103.02708" or "2103.02708v2". An
+                  unversioned id is pinned to the current version (from the
+                  arXiv metadata) before anything is fetched or reused.
         pdf_url: Explicit HTTPS arXiv PDF URL, used only when arxiv_id is not
                  given (must be on an arXiv host). If both are given, arxiv_id
                  wins.
         output_dir: Corpus root (relative to base_directory), one directory
-                    per paper beneath it (default "papers").
+                    per paper version beneath it (default "papers").
 
     Behavior:
-        Downloads to {output_dir}/{arxiv_id}/{arxiv_id}.pdf under
-        base_directory, alongside any source ArxivSourceTool has fetched for
-        the same paper, reusing a cached valid PDF if present. Validates the
-        %PDF- header.
+        Downloads to {output_dir}/{id}v{N}/{id}v{N}.pdf under base_directory,
+        alongside any source ArxivSourceTool has fetched for the same version,
+        reusing a cached valid PDF of that exact version if present. Validates
+        the %PDF- header. The fetch (URL, time, sha256) is recorded in
+        {output_dir}/{id}v{N}/retrieval.json.
 
     Returns JSON:
-        {"status": "ok", "schema": "literature-1.2", "arxiv_id": "...",
-         "pdf_path": "papers/2103.02708/2103.02708.pdf", "bytes": N,
-         "sha256": "...", "cached": false}
+        {"status": "ok", "schema": "literature-1.3", "arxiv_id": "2103.02708v2",
+         "requested_id": "2103.02708", "source_id": "arXiv:2103.02708v2",
+         "pdf_path": "papers/2103.02708v2/2103.02708v2.pdf", "bytes": N,
+         "sha256": "...", "url": "https://arxiv.org/pdf/2103.02708v2.pdf",
+         "retrieved_at": "...Z", "cached": false, "provenance": {...}}
     """
 
     # ======================== Runtime fields ======================== #
     arxiv_id: Optional[str] = RuntimeField(
-        default=None, description="arXiv identifier, e.g. '2103.02708'"
+        default=None,
+        description="arXiv identifier, e.g. '2103.02708' (latest) or '2103.02708v2'",
     )
     pdf_url: Optional[str] = RuntimeField(
         default=None,
@@ -260,7 +381,7 @@ class ArxivPDFTool(BaseTool):
         default="papers",
         description=(
             "Corpus root relative to base_directory; the PDF lands in "
-            "<output_dir>/<arxiv_id>/ next to any source fetched for it"
+            "<output_dir>/<arxiv_id>v<N>/ next to any source fetched for it"
         ),
     )
     # ================================================================ #
@@ -291,16 +412,8 @@ class ArxivPDFTool(BaseTool):
                 context=f"pdf_url={self.pdf_url}",
                 suggestion="Pass an arxiv_id, or an https://arxiv.org/... PDF URL",
             )
-
-        stem = _pdf_stem(self.arxiv_id, self.pdf_url)
-        if stem is None:
-            return self.format_error(
-                error="Invalid Parameter",
-                reason="Could not derive a filename from arxiv_id/pdf_url",
-            )
-
-        out_dir = _paper_dir(self.base_directory, self.output_dir, stem)
-        if out_dir is None:
+        root = _safe_join(self.base_directory, self.output_dir or "papers")
+        if root is None:
             return self.format_error(
                 error="Access Denied",
                 reason="output_dir escapes base_directory",
@@ -308,34 +421,45 @@ class ArxivPDFTool(BaseTool):
                 suggestion="Use a relative path inside base_directory",
             )
 
-        try:
-            os.makedirs(out_dir, exist_ok=True)
-            dest = os.path.join(out_dir, f"{stem}.pdf")
-            rel_dest = os.path.relpath(dest, os.path.realpath(self.base_directory))
+        base = os.path.realpath(self.base_directory)
+        request = {"arxiv_id": self.arxiv_id, "pdf_url": self.pdf_url,
+                   "output_dir": self.output_dir}
+        requested = validate_arxiv_id(self.arxiv_id) if self.arxiv_id else arxiv_id_from_url(self.pdf_url)
+        interface = ArxivInterface()
+        http: List[str] = []
 
-            # Reuse a cached, valid PDF for this exact source. Never follow a
-            # symlink at the leaf (a download would os.replace it safely, but a
-            # cache read must not escape the sandbox).
-            if (
-                os.path.exists(dest)
-                and not os.path.islink(dest)
-                and os.path.getsize(dest) > 0
-            ):
-                with open(dest, "rb") as fh:
-                    is_pdf = fh.read(5) == b"%PDF-"
-                if is_pdf:
-                    return json.dumps(
-                        {
-                            "status": "ok",
-                            "schema": SCHEMA_VERSION,
-                            "arxiv_id": self.arxiv_id,
-                            "pdf_path": rel_dest,
-                            "bytes": os.path.getsize(dest),
-                            "sha256": _sha256_file(dest),
-                            "cached": True,
-                        },
-                        indent=2,
+        versioned, resolve_err = None, None
+        if requested:
+            versioned, meta_url, resolve_err = _resolve(interface, requested)
+            if meta_url:
+                http.append(meta_url)
+
+        if versioned:
+            stem = _flat(versioned)
+        elif requested:
+            # Metadata unreachable: fetch the current PDF and read its version
+            # from what arXiv names the file; place it once that is known.
+            stem = None
+        else:
+            stem = _pdf_stem(None, self.pdf_url)
+
+        try:
+            os.makedirs(root, exist_ok=True)
+            if stem is not None:
+                out_dir = os.path.join(root, stem)
+                os.makedirs(out_dir, exist_ok=True)
+                dest = os.path.join(out_dir, f"{stem}.pdf")
+                cached = self._cached(dest, out_dir, versioned)
+                if cached is not None:
+                    return _with_provenance(
+                        base, "ArxivPDF", request, cached, http,
+                        request_url=cached["url"], from_cache=True,
+                        cached_at=cached["retrieved_at"],
+                        source_ids=[cached["source_id"]],
+                        files=[file_entry(base, dest, cached["sha256"])],
                     )
+            else:
+                dest = os.path.join(root, f".download-{secrets.token_hex(4)}.pdf")
         except OSError as e:
             return self.format_error(
                 error="Filesystem Error",
@@ -343,15 +467,12 @@ class ArxivPDFTool(BaseTool):
                 context=f"output_dir={self.output_dir}",
             )
 
+        fetch_id = versioned or requested
         try:
-            interface = ArxivInterface()
-            # arxiv_id takes precedence when both are given, so the downloaded
-            # source matches the cache key derived by _pdf_stem.
-            meta = interface.download_pdf(
-                dest,
-                arxiv_id=self.arxiv_id,
-                pdf_url=None if self.arxiv_id else self.pdf_url,
-            )
+            if fetch_id:
+                meta = interface.download_pdf(dest, arxiv_id=fetch_id)
+            else:
+                meta = interface.download_pdf(dest, pdf_url=self.pdf_url)
         except Exception as e:  # noqa: BLE001
             return self.format_error(
                 error="PDF Download Failed",
@@ -359,22 +480,95 @@ class ArxivPDFTool(BaseTool):
                 context=f"arxiv_id={self.arxiv_id} pdf_url={self.pdf_url}",
                 suggestion="Verify the arXiv id/URL; arXiv may be rate-limiting",
             )
+        http.append(meta["url"])
+        retrieved_at = now_iso()
 
-        return json.dumps(
-            {
-                "status": "ok",
-                "schema": SCHEMA_VERSION,
-                "arxiv_id": self.arxiv_id,
-                "pdf_path": rel_dest,
-                "bytes": meta["bytes"],
-                "sha256": meta["sha256"],
-                "cached": False,
-            },
-            indent=2,
+        if requested:
+            id_base, want = split_version(fetch_id)
+            served = version_from_response(id_base, meta.get("content_disposition"), meta.get("final_url"))
+            if want and served and served != want:
+                os.remove(dest)
+                return self.format_error(
+                    error="Version Mismatch",
+                    reason=f"asked for {fetch_id}, arXiv served {id_base}{served}",
+                    suggestion="Retry, or pass the version you want explicitly",
+                )
+            if not versioned:
+                if not served:
+                    os.remove(dest)
+                    return self.format_error(
+                        error="Version Resolution Failed",
+                        reason=f"could not determine which version of {requested} arXiv serves",
+                        context=resolve_err or "",
+                        suggestion="Pass an explicit version, e.g. '2103.02708v2'",
+                    )
+                versioned = f"{id_base}{served}"
+                stem = _flat(versioned)
+                out_dir = os.path.join(root, stem)
+                os.makedirs(out_dir, exist_ok=True)
+                final = os.path.join(out_dir, f"{stem}.pdf")
+                os.replace(dest, final)
+                dest = final
+        else:
+            out_dir = os.path.dirname(dest)
+
+        source_id = arxiv_source_id(versioned)
+        rel_dest = os.path.relpath(dest, base)
+        _write_meta(out_dir, source_id, "pdf", {
+            "url": meta["url"], "final_url": meta.get("final_url"),
+            "retrieved_at": retrieved_at, "sha256": meta["sha256"],
+            "bytes": meta["bytes"], "path": rel_dest,
+        })
+        result = {
+            "status": "ok",
+            "schema": SCHEMA_VERSION,
+            "arxiv_id": versioned,
+            "requested_id": self.arxiv_id or self.pdf_url,
+            "source_id": source_id,
+            "pdf_path": rel_dest,
+            "bytes": meta["bytes"],
+            "sha256": meta["sha256"],
+            "url": meta["url"],
+            "retrieved_at": retrieved_at,
+            "cached": False,
+        }
+        return _with_provenance(
+            base, "ArxivPDF", request, result, http,
+            request_url=meta["url"], source_ids=[source_id],
+            files=[file_entry(base, dest, meta["sha256"])],
         )
+
+    def _cached(self, dest: str, out_dir: str, versioned: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Result for a valid cached PDF of this exact version, else None.
+
+        Never follows a symlink at the leaf (a download would os.replace it
+        safely, but a cache read must not escape the sandbox).
+        """
+        if not (os.path.exists(dest) and not os.path.islink(dest) and os.path.getsize(dest) > 0):
+            return None
+        with open(dest, "rb") as fh:
+            if fh.read(5) != b"%PDF-":
+                return None
+        meta = _read_meta(out_dir).get("pdf", {})
+        url = meta.get("url") or (f"https://arxiv.org/pdf/{versioned}.pdf" if versioned else self.pdf_url)
+        return {
+            "status": "ok",
+            "schema": SCHEMA_VERSION,
+            "arxiv_id": versioned,
+            "requested_id": self.arxiv_id or self.pdf_url,
+            "source_id": arxiv_source_id(versioned),
+            "pdf_path": os.path.relpath(dest, os.path.realpath(self.base_directory)),
+            "bytes": os.path.getsize(dest),
+            "sha256": _sha256_file(dest),
+            "url": url,
+            "retrieved_at": meta.get("retrieved_at") or _mtime_iso(dest),
+            "cached": True,
+        }
 
 
 # ======================= LaTeX source (e-print) ================= #
+
+_EPRINT_EXT = {"tar": ".tar", "tex": ".tex", "gzip-tar": ".tar.gz", "gzip-tex": ".tex.gz"}
 
 
 class ArxivSourceTool(BaseTool):
@@ -384,27 +578,32 @@ class ArxivSourceTool(BaseTool):
     source preserves them exactly.
 
     Input:
-        arxiv_id: arXiv identifier, e.g. "2103.02708" (version suffix optional).
-        output_dir: Directory (relative to base_directory) for extracted source
-                    files (default "source").
+        arxiv_id: arXiv identifier, e.g. "2103.02708" or "2103.02708v2". An
+                  unversioned id is pinned to the current version before any
+                  cache lookup or download.
+        output_dir: Corpus root (relative to base_directory), default "papers".
         inline_one_level: Inline \\input{...}/\\include{...} one level into the
                           main file (default true).
         preview_chars: Length of the inline LaTeX preview returned (default 2000).
 
     Behavior:
-        Downloads https://export.arxiv.org/e-print/<id> (size-capped), detects
-        the payload (gzipped tar of sources / gzipped single .tex / bare PDF),
-        extracts archives with strict safety checks, resolves the main .tex,
+        Downloads https://export.arxiv.org/e-print/<id>v<N> (size-capped),
+        keeps the payload as <output_dir>/<id>v<N>/<id>v<N>.eprint.<ext>,
+        extracts archives with strict safety checks into source/ (the original
+        files, verbatim, so line numbers can be cited), resolves the main .tex,
         strips % comments, optionally inlines one level of \\input, and writes
-        the normalized LaTeX to <output_dir>/<id>/source.tex. Everything for a
-        paper lands in <output_dir>/<id>/, shared with ArxivPDFTool.
+        that normalized LaTeX to source.tex. retrieval.json records the URL,
+        time and sha256 of the payload.
 
     Returns JSON:
-        {"status": "ok", "schema": "literature-1.1", "arxiv_id": "...",
+        {"status": "ok", "schema": "literature-1.3", "arxiv_id": "2103.02708v2",
+         "requested_id": "2103.02708", "source_id": "arXiv:2103.02708v2",
          "source_type": "tar"|"single_tex"|"pdf_only",
-         "source_dir": "papers/<id>/source/"?, "main_tex": ".../ms.tex"?,
-         "tex_path": "papers/<id>/source.tex"?, "n_files": N, "chars": M,
-         "preview": "...", "cached": bool}
+         "source_dir": ".../source", "main_tex": ".../source/ms.tex",
+         "tex_path": ".../source.tex", "n_files": N, "chars": M,
+         "sha256": "<e-print payload>", "eprint_path": "...",
+         "tex_sha256": "<source.tex>", "url": "...", "retrieved_at": "...Z",
+         "preview": "...", "cached": bool, "provenance": {...}}
 
         source_type "pdf_only" means arXiv has no LaTeX source for this paper.
         That is a normal outcome, not an error: the PDF arXiv served instead is
@@ -413,13 +612,13 @@ class ArxivSourceTool(BaseTool):
 
     # ======================== Runtime fields ======================== #
     arxiv_id: str = RuntimeField(
-        description="arXiv identifier, e.g. '2103.02708' (version suffix optional)"
+        description="arXiv identifier, e.g. '2103.02708' (latest) or '2103.02708v2'"
     )
     output_dir: Optional[str] = RuntimeField(
         default="papers",
         description=(
             "Corpus root relative to base_directory; this paper's files land in "
-            "<output_dir>/<arxiv_id>/ next to any PDF fetched for it"
+            "<output_dir>/<arxiv_id>v<N>/ next to any PDF fetched for it"
         ),
     )
     inline_one_level: Optional[bool] = RuntimeField(
@@ -446,48 +645,43 @@ class ArxivSourceTool(BaseTool):
                 context=f"arxiv_id={self.arxiv_id}",
                 suggestion="Use e.g. '2103.02708' or 'hep-ph/9905221' (version optional)",
             )
-        stem = _pdf_stem(self.arxiv_id, None)
-
         base = os.path.realpath(self.base_directory)
-        paper_dir = _paper_dir(self.base_directory, self.output_dir, stem)
-        if paper_dir is None:
+        if _paper_dir(self.base_directory, self.output_dir, "x") is None:
             return self.format_error(
                 error="Access Denied",
                 reason="output_dir escapes base_directory",
                 context=self.output_dir,
                 suggestion="Use a relative path inside base_directory",
             )
-        tex_abs = os.path.join(paper_dir, "source.tex")
-        tex_rel = os.path.relpath(tex_abs, base)
+        request = {"arxiv_id": self.arxiv_id, "output_dir": self.output_dir,
+                   "inline_one_level": self.inline_one_level}
+        n_preview = self.preview_chars if self.preview_chars is not None else 2000
+        interface = ArxivInterface()
+        http: List[str] = []
 
-        # Cache: normalized LaTeX already produced for this id.
-        if os.path.isfile(tex_abs) and os.path.getsize(tex_abs) > 0:
-            try:
-                with open(tex_abs, "r", encoding="utf-8", errors="replace") as fh:
-                    text = fh.read()
-            except OSError as e:
-                return self.format_error(error="Filesystem Error", reason=str(e))
-            n = self.preview_chars if self.preview_chars is not None else 2000
-            return json.dumps(
-                {
-                    "status": "ok",
-                    "schema": SCHEMA_VERSION,
-                    "arxiv_id": self.arxiv_id,
-                    "source_type": "cached",
-                    "tex_path": tex_rel,
-                    "chars": len(text),
-                    "preview": text[:n],
-                    "cached": True,
-                },
-                indent=2,
-            )
+        versioned, meta_url, resolve_err = _resolve(interface, valid)
+        if meta_url:
+            http.append(meta_url)
 
-        src_dir = os.path.join(paper_dir, "source")
+        # Cache: this exact version was fetched before and its payload kept.
+        if versioned:
+            paper_dir = _paper_dir(self.base_directory, self.output_dir, _flat(versioned))
+            cached = self._cached(paper_dir, versioned, base, n_preview)
+            if cached is not None:
+                files = [file_entry(base, cached["eprint_path"], cached["sha256"])]
+                if cached.get("tex_path"):
+                    files.append(file_entry(base, cached["tex_path"], cached.get("tex_sha256")))
+                return _with_provenance(
+                    base, "ArxivSource", request, cached, http,
+                    request_url=cached["url"], from_cache=True,
+                    cached_at=cached["retrieved_at"],
+                    source_ids=[cached["source_id"]], files=files,
+                )
 
         # 1. Download the e-print payload.
+        id_base, want = split_version(versioned or valid)
         try:
-            interface = ArxivInterface()
-            payload = interface.download_eprint(self.arxiv_id)
+            payload = interface.download_eprint(versioned or valid)
         except Exception as e:  # noqa: BLE001
             return self.format_error(
                 error="E-print Download Failed",
@@ -495,12 +689,46 @@ class ArxivSourceTool(BaseTool):
                 context=f"arxiv_id={self.arxiv_id}",
                 suggestion="Verify the arXiv id; arXiv may be rate-limiting",
             )
+        http.append(payload["url"])
+        retrieved_at = now_iso()
+        served = version_from_response(id_base, payload.get("content_disposition"), payload.get("final_url"))
+        if want and served and served != want:
+            return self.format_error(
+                error="Version Mismatch",
+                reason=f"asked for {id_base}{want}, arXiv served {id_base}{served}",
+                suggestion="Retry, or pass the version you want explicitly",
+            )
+        if not versioned:
+            if not served:
+                return self.format_error(
+                    error="Version Resolution Failed",
+                    reason=f"could not determine which version of {valid} arXiv serves",
+                    context=resolve_err or "",
+                    suggestion="Pass an explicit version, e.g. '2103.02708v2'",
+                )
+            versioned = f"{id_base}{served}"
+        stem = _flat(versioned)
+        source_id = arxiv_source_id(versioned)
+        paper_dir = _paper_dir(self.base_directory, self.output_dir, stem)
+        src_dir = os.path.join(paper_dir, "source")
+        tex_abs = os.path.join(paper_dir, "source.tex")
         data = payload["data"]
+        common = {
+            "status": "ok",
+            "schema": SCHEMA_VERSION,
+            "arxiv_id": versioned,
+            "requested_id": self.arxiv_id,
+            "source_id": source_id,
+        }
+        fetched = {"sha256": payload["sha256"], "url": payload["url"],
+                   "retrieved_at": retrieved_at, "cached": False}
 
         # 2. Classify + unwrap.
         try:
+            os.makedirs(paper_dir, exist_ok=True)
             kind = detect_payload(data)
-            if kind == "gzip":
+            gz = kind == "gzip"
+            if gz:
                 data = gunzip_capped(data)
                 kind = detect_payload(data)
                 if kind == "gzip":  # double-wrapped is not a thing; treat as tex
@@ -510,34 +738,33 @@ class ArxivSourceTool(BaseTool):
                 # already hold those bytes, so save them under the same
                 # per-paper directory rather than telling the caller to fetch
                 # the identical file again through the 3s rate limiter.
-                result = {
-                    "status": "ok",
-                    "schema": SCHEMA_VERSION,
-                    "arxiv_id": self.arxiv_id,
+                pdf_abs = os.path.join(paper_dir, f"{stem}.pdf")
+                with open(pdf_abs, "wb") as fh:
+                    fh.write(data)
+                result = dict(common, source_type="pdf_only", **fetched)
+                result["pdf_path"] = result["eprint_path"] = os.path.relpath(pdf_abs, base)
+                result["bytes"] = len(data)
+                result["suggestion"] = (
+                    "No LaTeX source on arXiv for this paper. The PDF was "
+                    "saved at pdf_path; run PDFToTeXTool on it to recover "
+                    "TeX-faithful text."
+                )
+                _write_meta(paper_dir, source_id, "eprint", {
+                    "url": payload["url"], "final_url": payload.get("final_url"),
+                    "retrieved_at": retrieved_at, "sha256": payload["sha256"],
+                    "bytes": payload["bytes"], "path": result["eprint_path"],
                     "source_type": "pdf_only",
-                    "cached": False,
-                }
-                try:
-                    os.makedirs(paper_dir, exist_ok=True)
-                    pdf_abs = os.path.join(paper_dir, f"{stem}.pdf")
-                    with open(pdf_abs, "wb") as fh:
-                        fh.write(data)
-                    result["pdf_path"] = os.path.relpath(pdf_abs, base)
-                    result["bytes"] = len(data)
-                    result["suggestion"] = (
-                        "No LaTeX source on arXiv for this paper. The PDF was "
-                        "saved at pdf_path; run PDFToTeXTool on it to recover "
-                        "TeX-faithful text."
-                    )
-                except OSError as e:
-                    # The PDF is a convenience here, not the result. Report the
-                    # source verdict and let the caller retrieve it separately.
-                    result["pdf_error"] = str(e)
-                    result["suggestion"] = (
-                        "No LaTeX source on arXiv for this paper; use "
-                        "ArxivPDFTool + PDFToTeXTool instead."
-                    )
-                return json.dumps(result, indent=2)
+                })
+                return _with_provenance(
+                    base, "ArxivSource", request, result, http,
+                    request_url=payload["url"], source_ids=[source_id],
+                    files=[file_entry(base, pdf_abs, payload["sha256"])],
+                )
+
+            kind_key = ("gzip-" if gz else "") + ("tar" if kind == "tar" else "tex")
+            eprint_abs = os.path.join(paper_dir, f"{stem}.eprint{_EPRINT_EXT[kind_key]}")
+            with open(eprint_abs, "wb") as fh:
+                fh.write(payload["data"])
 
             os.makedirs(src_dir, exist_ok=True)
             if kind == "tar":
@@ -564,7 +791,6 @@ class ArxivSourceTool(BaseTool):
                 tex = inline_inputs(tex, src_dir, main_rel)
             tex = strip_comments(tex)
 
-            os.makedirs(os.path.dirname(tex_abs), exist_ok=True)
             with open(tex_abs, "w", encoding="utf-8") as fh:
                 fh.write(tex)
         except ValueError as e:  # archive-safety violations, caps, bombs
@@ -576,23 +802,84 @@ class ArxivSourceTool(BaseTool):
         except OSError as e:
             return self.format_error(error="Filesystem Error", reason=str(e))
 
-        n = self.preview_chars if self.preview_chars is not None else 2000
-        return json.dumps(
-            {
-                "status": "ok",
-                "schema": SCHEMA_VERSION,
-                "arxiv_id": self.arxiv_id,
-                "source_type": source_type,
-                "source_dir": os.path.relpath(src_dir, base),
-                "main_tex": os.path.join(os.path.relpath(src_dir, base), main_rel),
-                "tex_path": tex_rel,
-                "n_files": len(files),
-                "chars": len(tex),
-                "preview": tex[:n],
-                "cached": False,
-            },
-            indent=2,
+        tex_sha = _sha256_file(tex_abs)
+        result = dict(
+            common,
+            source_type=source_type,
+            source_dir=os.path.relpath(src_dir, base),
+            main_tex=os.path.join(os.path.relpath(src_dir, base), main_rel),
+            tex_path=os.path.relpath(tex_abs, base),
+            n_files=len(files),
+            chars=len(tex),
+            eprint_path=os.path.relpath(eprint_abs, base),
+            tex_sha256=tex_sha,
+            note=(
+                "source.tex is comment-stripped with \\input inlined; the "
+                "original files under source_dir are kept verbatim, so cite "
+                "line numbers from them (QuoteSource does)."
+            ),
+            preview=tex[:n_preview],
+            **fetched,
+        )
+        _write_meta(paper_dir, source_id, "eprint", {
+            "url": payload["url"], "final_url": payload.get("final_url"),
+            "retrieved_at": retrieved_at, "sha256": payload["sha256"],
+            "bytes": payload["bytes"], "path": result["eprint_path"],
+            "source_type": source_type, "source_dir": result["source_dir"],
+            "main_tex": result["main_tex"], "tex_path": result["tex_path"],
+            "n_files": len(files),
+        })
+        return _with_provenance(
+            base, "ArxivSource", request, result, http,
+            request_url=payload["url"], source_ids=[source_id],
+            files=[file_entry(base, eprint_abs, payload["sha256"]),
+                   file_entry(base, tex_abs, tex_sha)],
         )
 
+    def _cached(self, paper_dir: str, versioned: str, base: str, n_preview: int) -> Optional[Dict[str, Any]]:
+        """Result for a previously fetched copy of this exact version, else None.
 
-# ======================== Text extraction ====================== #
+        Requires the kept e-print payload, so the returned sha256 is always
+        recomputed from the bytes on disk rather than trusted from a record.
+        """
+        meta = _read_meta(paper_dir).get("eprint")
+        if not meta or not meta.get("path"):
+            return None
+        eprint_abs = _safe_join(base, meta["path"])
+        if not eprint_abs or not os.path.isfile(eprint_abs) or os.path.islink(eprint_abs):
+            return None
+        result: Dict[str, Any] = {
+            "status": "ok",
+            "schema": SCHEMA_VERSION,
+            "arxiv_id": versioned,
+            "requested_id": self.arxiv_id,
+            "source_id": arxiv_source_id(versioned),
+            "source_type": meta.get("source_type"),
+            "sha256": _sha256_file(eprint_abs),
+            "eprint_path": meta["path"],
+            "url": meta.get("url"),
+            "retrieved_at": meta.get("retrieved_at") or _mtime_iso(eprint_abs),
+            "cached": True,
+        }
+        if meta.get("source_type") == "pdf_only":
+            result["pdf_path"] = meta["path"]
+            result["bytes"] = os.path.getsize(eprint_abs)
+            return result
+        tex_abs = _safe_join(base, meta.get("tex_path") or "")
+        if not tex_abs or not os.path.isfile(tex_abs):
+            return None
+        try:
+            with open(tex_abs, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            return None
+        result.update(
+            source_dir=meta.get("source_dir"),
+            main_tex=meta.get("main_tex"),
+            tex_path=meta.get("tex_path"),
+            n_files=meta.get("n_files"),
+            chars=len(text),
+            tex_sha256=_sha256_file(tex_abs),
+            preview=text[:n_preview],
+        )
+        return result

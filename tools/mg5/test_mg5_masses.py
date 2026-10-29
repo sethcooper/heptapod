@@ -52,3 +52,10 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn(); print(f"[ok] {name}")
     print("all mg5 mass-injection tests passed")
+
+
+def test_relaunch_card_keeps_run_settings_only():
+    from tools.mg5.mg5 import _relaunch_card
+    card = "import model sm\ngenerate h > e+ e- mu+ mu-\noutput proc\nlaunch proc\nset nevents 100\nset ptl 0.0\ndone\n"
+    out = _relaunch_card(card, "/abs/proc", nevents=5000, seed=7)
+    assert out.splitlines() == ["launch /abs/proc", "set nevents 5000", "set ptl 0.0", "done", "set iseed 7"]

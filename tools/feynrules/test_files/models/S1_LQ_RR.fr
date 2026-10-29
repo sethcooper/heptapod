@@ -73,7 +73,7 @@ S[100] == {
     PropagatorLabel  -> "S1",
     PropagatorType   -> ScalarDash,
     PropagatorArrow  -> None,
-    QuantumNumbers   -> {Q -> -1/3},
+    QuantumNumbers   -> {Q -> -1/3, Y -> -1/3},
     Indices          -> {Index[Colour]},
     ParticleName     -> "S1",
     AntiParticleName -> "S1~",

@@ -26,6 +26,8 @@ from .matrix_element import (
     EstimateMatrixElementTool, INTERACTION_TYPES, resolve_nda_interaction_type
 )
 from .topology import validate_graph_theory_constraint
+from . import kinematics
+from .evaluated import evaluated_formula
 from .summary_formatting import format_decay_width_summary
 from tools.logging.findings import append_finding
 
@@ -120,6 +122,10 @@ class EstimateDecayWidthNDATool(BaseTool):
     base_directory: str = StateField(
         description="Base sandbox directory for file operations"
     )
+    record_finding: bool = StateField(
+        default=True,
+        description="Append the estimate to the findings ledger (off for batch callers)"
+    )
     # ================================================================ #
 
     def _setup(self):
@@ -184,7 +190,8 @@ class EstimateDecayWidthNDATool(BaseTool):
         self,
         propagators: list,
         mother_mass: float,
-        n_body: int
+        n_body: int,
+        final_masses: Optional[list] = None,
     ) -> tuple[float, str, list, list]:
         """
         Calculate propagator suppression factor.
@@ -238,6 +245,18 @@ class EstimateDecayWidthNDATool(BaseTool):
             M_prop = prop.mass
             regime = prop.regime
             Gamma_prop = prop.width or 0.0
+
+            # Known far-side daughters: the allowed virtuality interval fixes
+            # |P(q^2)|^2 (a Breit-Wigner average for a line with a width,
+            # otherwise the typical virtuality).
+            if prop.final_legs is not None and final_masses and None not in final_masses:
+                lo, hi = kinematics.virtuality_range(mother_mass, final_masses, prop.final_legs)
+                prop_factor = kinematics.propagator_factor(M_prop, Gamma_prop, lo, hi)
+                total_suppression *= prop_factor
+                latex_parts.append(f"|q^2 - M_{{{M_prop:.0f}}}^2|^{{-2}}")
+                regime_info.append(f"virtuality {math.sqrt(lo):.3g} <= sqrt(q^2) <= {math.sqrt(hi):.3g} GeV (M={M_prop:.1f})")
+                regime_types.append("virtuality")
+                continue
 
             # Determine regime if auto
             if regime == "auto":
@@ -440,12 +459,41 @@ class EstimateDecayWidthNDATool(BaseTool):
         mother_mass_val = diagram.initial[0].mass if diagram.initial[0].mass else mother_mass
         ext_polarization *= polarization_factor(mother_spin_val, mother_mass, mother_mass_val)
 
+        # A massive final vector's longitudinal growth E^2/M^2 needs a source:
+        # by the equivalence theorem the longitudinal state couples as the
+        # Goldstone boson, in proportion to the masses at the vertex that
+        # emits it. Without a fermion or scalar at that vertex at least as
+        # heavy as the vector (a gauge self-coupling, or light fermions), the
+        # growth cancels between diagrams and the factor keeps its value at
+        # rest, 2.
+        def leg_spin_mass(name):
+            kind, _, k = name.partition(":")
+            k = int(k)
+            if kind == "in":
+                return (mother_spin if mother_spin is not None else 0), mother_mass
+            if kind == "out":
+                q = final_particles[k]
+                return (q.spin if q.spin is not None else 0.5), final_masses[k]
+            q = diagram.propagators[k]
+            return (q.spin if q.spin is not None else 0), (q.mass or 0.0)
+
+        unsourced_vectors = []
+        for i, p in enumerate(final_particles):
+            if p.spin != 1 or not final_masses[i]:
+                continue
+            emitting = [v for v in diagram.vertices if v.legs and f"out:{i}" in v.legs]
+            if len(emitting) != 1:
+                continue
+            others = [leg_spin_mass(x) for x in emitting[0].legs if x != f"out:{i}"]
+            if not any(sp in (0, 0.5) and m >= final_masses[i] for sp, m in others):
+                unsourced_vectors.append(i)
+
         # Final state particles
         for i, p in enumerate(final_particles):
             spin_i = p.spin if p.spin is not None else 0.5
             E_i = final_energies[i]
             m_i = final_masses[i]
-            ext_polarization *= polarization_factor(spin_i, E_i, m_i)
+            ext_polarization *= 2.0 if i in unsourced_vectors else polarization_factor(spin_i, E_i, m_i)
 
         # Mother particle spin averaging (1/N_s where N_s = 2s+1)
         mother_spin_states = int(2 * mother_spin_val + 1)
@@ -459,7 +507,8 @@ class EstimateDecayWidthNDATool(BaseTool):
             prop_spin: float,
             E_prop: float,
             M_prop: float,
-            Gamma_prop: float
+            Gamma_prop: float,
+            averaged_denominator: Optional[float] = None,
         ) -> float:
             """
             Calculate |Propagator(E)|² with spin-dependent numerator from Table 1.
@@ -473,6 +522,8 @@ class EstimateDecayWidthNDATool(BaseTool):
             # For very small denominator (near resonance), use minimum
             if denom < 1e-20:
                 denom = 1e-20
+            if averaged_denominator is not None:
+                denom = 1.0 / averaged_denominator
 
             # Spin-dependent numerator from Table 1
             if prop_spin == 0:
@@ -521,6 +572,13 @@ class EstimateDecayWidthNDATool(BaseTool):
             # Estimate propagator energy from final state energies it connects to
             # Simple approximation: use average of final state energies
             E_prop = sum(final_energies) / n_body if n_body > 0 else mother_mass / 2
+            averaged = None
+            interval = None
+            if prop.final_legs is not None:
+                lo, hi = kinematics.virtuality_range(mother_mass, final_masses, prop.final_legs)
+                E_prop = math.sqrt((lo + hi) / 2)
+                averaged = kinematics.propagator_factor(M_prop, Gamma_prop, lo, hi)
+                interval = [lo, hi]
 
             # For heavy propagators (M_prop >> mother_mass), the propagator is far off-shell
             # The relevant energy scale is the mother mass (typical momentum transfer), NOT M_prop
@@ -528,14 +586,17 @@ class EstimateDecayWidthNDATool(BaseTool):
             # Keep E_prop at the mother mass scale for heavy propagators
             # (Note: the 1/M^4 suppression is handled in the denominator correctly)
 
-            pf = propagator_factor_improved(prop_spin, E_prop, M_prop, Gamma_prop)
+            pf = propagator_factor_improved(prop_spin, E_prop, M_prop, Gamma_prop, averaged)
             prop_factor_improved *= pf
 
             prop_details.append({
+                "label": prop.label,
                 "mass": M_prop,
                 "width": Gamma_prop,
                 "spin": prop_spin,
                 "energy_estimate": E_prop,
+                "virtuality": interval,
+                "breit_wigner_average": interval is not None and kinematics.averages(M_prop, Gamma_prop, *interval),
                 "factor": pf
             })
 
@@ -583,7 +644,8 @@ class EstimateDecayWidthNDATool(BaseTool):
         # - |Σ C_i Lorentz_i|² = squared vertex factor (coupling × simplified Lorentz)
         #
         # For renormalizable vertices, Lorentz structures (γ^μ, etc.) → 1
-        # so vertex factor = coupling. Energy dependence is in ∏P_ext.
+        # so vertex factor = coupling, except where the coupling multiplies a
+        # momentum (below). Other energy dependence is in ∏P_ext.
         #
         # For non-renormalizable (dim > 4), vertex has momentum factors:
         # - dim-5: vertex ∝ E (e.g., magnetic moment)
@@ -594,23 +656,35 @@ class EstimateDecayWidthNDATool(BaseTool):
         n_vertices = len(diagram.vertices)
         vertex_types = [v.type.lower() for v in diagram.vertices]
 
-        # Check for higher-dimensional operators
-        # - For 4-fermion contact operators: E⁴ is FULLY captured by 4 external
-        #   fermion polarizations (each ∝ 2E), so vertex_energy_factor = 1.0
-        # - For other dim-6 operators with explicit momentum insertions (e.g.,
-        #   dipole operators), we may need vertex_energy_factor
         is_4fermion_contact = any("4fermion" in vt or "fermi" in vt for vt in vertex_types)
 
-        if is_4fermion_contact:
-            # For 4-fermion contact operators (Fermi theory, etc.):
-            # The |M|² ∝ G_F² × (spinor traces) where spinor traces give E⁴
-            # This E⁴ is already in ext_polarization (4 fermions × 2E each)
-            # So no additional vertex energy factor needed
-            vertex_energy_factor = 1.0
-        else:
-            # For renormalizable (dim-4) or other operators, vertex is ~constant
-            # All energy dependence is in external polarizations ∏P_ext
-            vertex_energy_factor = 1.0
+        # A renormalizable vertex is constant except where the coupling
+        # multiplies a momentum: three vectors (the gauge self-coupling) or two
+        # scalars and a vector. Each such vertex gives |M|^2 a factor E_v^2,
+        # E_v the largest energy among its legs (the parent's mass, a final
+        # energy, or an internal line's sqrt of mean virtuality). 4-fermion
+        # contact operators carry their E^4 in the external polarizations.
+        vertex_energy_factor = 1.0
+        derivative_vertices = []
+        if not is_4fermion_contact:
+            def leg(name):
+                kind, _, k = name.partition(":")
+                k = int(k)
+                if kind == "in":
+                    return mother_spin_val, mother_mass
+                if kind == "out":
+                    p = final_particles[k]
+                    return (p.spin if p.spin is not None else 0.5), final_energies[k]
+                return prop_details[k]["spin"], prop_details[k]["energy_estimate"]
+            for v in diagram.vertices:
+                if not v.legs or len(v.legs) != 3:
+                    continue
+                legs = [leg(x) for x in v.legs]
+                spins = sorted(sp for sp, _ in legs)
+                if spins in ([1, 1, 1], [0, 0, 1]):
+                    energy = max(e for _, e in legs)
+                    derivative_vertices.append({"legs": v.legs, "energy": energy})
+                    vertex_energy_factor *= energy ** 2
 
         # ====================================================================
         # Back-to-back kinematic correction for 2-body fermionic decays
@@ -648,8 +722,10 @@ class EstimateDecayWidthNDATool(BaseTool):
             if n_final_fermions == 2:
                 # Only apply correction for unprojected trace structures.
                 # Chiral vertices (PL/PR projected) already match the NDA.
+                # Resolve first: a valence suffix ("left-handed-3pt", as
+                # EnumerateDiagrams writes) must not hide a chiral vertex.
                 all_chiral = all(
-                    vt in _CHIRAL_VERTEX_TYPES for vt in vertex_types
+                    resolve_nda_interaction_type(vt) in _CHIRAL_VERTEX_TYPES for vt in vertex_types
                 )
                 if not all_chiral:
                     backtoback_correction = 2.0
@@ -664,8 +740,11 @@ class EstimateDecayWidthNDATool(BaseTool):
             backtoback_correction
         )
 
-        # Final width
-        width_improved = (1.0 / (2.0 * mother_mass)) * phi_n_improved * me_sq_improved
+        # Final width, with the identical-particle factor (as the raw estimate;
+        # the contact path above starts from the raw width, which has it)
+        from tools.nda.simple_diagram import compute_symmetry_factor
+        symmetry = compute_symmetry_factor(diagram)
+        width_improved = (1.0 / (2.0 * mother_mass)) * phi_n_improved * me_sq_improved / symmetry
 
         return {
             "width_gev_improved": width_improved,
@@ -675,14 +754,67 @@ class EstimateDecayWidthNDATool(BaseTool):
                 "external_polarization": ext_polarization,
                 "spin_averaging": spin_avg,
                 "vertex_energy_factor": vertex_energy_factor,
+                "derivative_vertices": derivative_vertices,
+                "unsourced_vectors": unsourced_vectors,
                 "propagator_factor": prop_factor_improved,
                 "propagator_details": prop_details,
                 "phase_space_base": phi_n_base,
                 "phase_space_improved": phi_n_improved,
                 "fudge_factor": C_PS_FUDGE,
                 "backtoback_correction": backtoback_correction,
-                "matrix_element_sq": me_sq_improved
+                "matrix_element_sq": me_sq_improved,
+                "n_body": n_body,
+                "mother_mass": mother_mass,
+                "mother_spin": mother_spin_val,
+                "final_masses_gev": final_masses,
+                "final_spins": [p.spin if p.spin is not None else 0.5 for p in final_particles],
+                "color_factor": color_factor,
+                "coupling_sq": total_coupling_sq,
+                "symmetry_factor": symmetry,
             }
+        }
+
+    def _narrow_width(self, diagram: Dict[str, Any], parsed: Diagram, mother_mass: float,
+                      final_masses: list) -> Optional[Dict[str, Any]]:
+        """Narrow-width estimate: for each outermost line R that can go on shell,
+        Gamma(parent -> rest + R) Gamma(R -> S) / Gamma_R, each factor estimated
+        by this tool (inner resonances recursively); separate outermost lines
+        (e.g. either Z in H -> Z Z*) add, one on shell at a time. None when no
+        line resonates or a factor cannot be estimated."""
+        lines = kinematics.resonant_lines(diagram, mother_mass, final_masses)
+        if not lines:
+            return None
+        sides = kinematics.far_side(diagram)
+        outermost = [j for j in lines
+                     if not any(k != j and set(sides[j]) < set(sides[k]) for k in lines)]
+        from tools.nda.simple_diagram import compute_symmetry_factor
+        symmetry = compute_symmetry_factor(parsed)
+        terms = []
+        for j in outermost:
+            R = parsed.propagators[j]
+            production, decay = kinematics.split_at(diagram, j)
+            decay_color = R.decay_color_factor
+            if decay_color is None:
+                decay_color = infer_color_factor([parsed.final[i] for i in sides[j]])
+            decay["color_factor"] = decay_color
+            production["color_factor"] = parsed.color_factor / decay_color
+            widths = []
+            for sub in (production, decay):
+                out = json.loads(type(self)(diagram=sub, include_summary=False, record_finding=False,
+                                            base_directory=self.base_directory)._run())
+                if out.get("status") != "ok" or not out.get("width_gev"):
+                    return None
+                widths.append(out)
+            terms.append({
+                "width_gev": widths[0]["width_gev"] * widths[1]["width_gev"] / R.width / symmetry,
+                "resonance": {"label": R.label, "mass": R.mass, "width": R.width, "final_legs": sides[j]},
+                "production": widths[0],
+                "decay": widths[1],
+            })
+        return {
+            "width_gev": sum(t["width_gev"] for t in terms),
+            "resonances": terms,
+            "formula": r"\Gamma \approx \sum_R \Gamma(\text{parent} \to X\,R)\,\Gamma(R \to S)/\Gamma_R",
         }
 
     def _resolve_coupling_value(self, vertex: Vertex, couplings: Dict[str, float]) -> float:
@@ -822,6 +954,18 @@ class EstimateDecayWidthNDATool(BaseTool):
 
         final_masses = [p.mass for p in parsed_diagram.final]
 
+        # Connectivity (optional): each propagator's far-side daughters, and a
+        # narrow-width factorization when a line can go on shell.
+        narrow = None
+        if kinematics.has_connectivity(diagram) and None not in final_masses:
+            try:
+                for prop, legs in zip(parsed_diagram.propagators, kinematics.far_side(diagram)):
+                    if prop.final_legs is None:
+                        prop.final_legs = legs
+                narrow = self._narrow_width(diagram, parsed_diagram, mother_mass, final_masses)
+            except ValueError as e:
+                return self.format_error(error="Connectivity Error", reason=str(e))
+
         # ====================================================================
         # STEP 1: Phase Space
         # ====================================================================
@@ -847,14 +991,20 @@ class EstimateDecayWidthNDATool(BaseTool):
         # STEP 2: Matrix Element
         # ====================================================================
 
-        # Combine coupling values from all vertices
+        # Combine coupling values from all vertices. The raw estimate counts
+        # energies by vertex, so a dimensionful coupling enters in units of the
+        # decaying mass; the improved estimate carries the energy dependence in
+        # its polarizations and propagators, so it takes couplings as given.
         total_coupling = 1.0
+        total_coupling_physical = 1.0
         interaction_types = []
 
         for vertex in parsed_diagram.vertices:
             try:
                 coupling_val = self._resolve_coupling_value(vertex, parsed_diagram.couplings)
-                total_coupling *= coupling_val
+                # A dimensionful coupling counts in units of the decaying mass.
+                total_coupling *= coupling_val / mother_mass ** vertex.coupling_dimension
+                total_coupling_physical *= coupling_val
                 interaction_types.append(resolve_nda_interaction_type(vertex.type))
             except ValueError as e:
                 return self.format_error(
@@ -973,11 +1123,19 @@ class EstimateDecayWidthNDATool(BaseTool):
         # ====================================================================
         # STEP 3: Propagator Suppression
         # ====================================================================
-        propagator_suppression, propagator_latex, propagator_regimes, propagator_regime_types = \
-            self._calculate_propagator_suppression(
-                parsed_diagram.propagators,
-                mother_mass,
-                n_body
+        try:
+            propagator_suppression, propagator_latex, propagator_regimes, propagator_regime_types = \
+                self._calculate_propagator_suppression(
+                    parsed_diagram.propagators,
+                    mother_mass,
+                    n_body,
+                    final_masses,
+                )
+        except kinematics.OnShellStableLine as e:
+            return self.format_error(
+                error="On-Shell Intermediate Without Width",
+                reason=str(e) + "; this final state is a lower-multiplicity decay followed by the decay of a particle the inputs treat as stable",
+                suggestion="Give the line its width, or estimate the lower-multiplicity decay instead",
             )
 
         # ====================================================================
@@ -999,7 +1157,7 @@ class EstimateDecayWidthNDATool(BaseTool):
         improved_estimate = self._calculate_kinematics_improved_estimate(
             diagram=parsed_diagram,
             mother_mass=mother_mass,
-            total_coupling_sq=total_coupling**2,
+            total_coupling_sq=total_coupling_physical**2,
             n_body=n_body,
             color_factor=parsed_diagram.color_factor,
             nda_width=width_gev  # Pass NDA width for contact interactions
@@ -1198,7 +1356,10 @@ class EstimateDecayWidthNDATool(BaseTool):
         # ====================================================================
         # Determine best estimate
         improved_width = improved_estimate.get("width_gev_improved", 0)
-        if improved_width > 0:
+        if narrow is not None:
+            best_width = narrow["width_gev"]
+            method = "narrow width"
+        elif improved_width > 0:
             best_width = improved_width
             method = "improved (arXiv:1402.1178)"
         else:
@@ -1219,6 +1380,24 @@ class EstimateDecayWidthNDATool(BaseTool):
                 "not shown in the formula. Compare widths numerically, not via formulas."
             ),
         }
+        if method.startswith("improved"):
+            # The evaluated expression: every factor of the improved estimate,
+            # which multiplies out to width_gev.
+            evaluated = evaluated_formula(
+                improved_estimate["details"], parsed_diagram,
+                coupling_values=[self._resolve_coupling_value(v, parsed_diagram.couplings)
+                                 for v in parsed_diagram.vertices])
+            if evaluated is not None:
+                result.update(formula=evaluated["formula"], formula_type="evaluated",
+                              definitions=evaluated["definitions"], factors=evaluated["factors"],
+                              formula_scaling=formula)
+                result.pop("formula_note")
+        if narrow is not None:
+            result["narrow_width"] = narrow
+            result["formula"] = narrow["formula"]
+            result["formula_type"] = "narrow_width"
+            for key in ("definitions", "factors", "formula_scaling"):
+                result.pop(key, None)
         if warnings:
             result["warnings"] = warnings
 
@@ -1246,6 +1425,8 @@ class EstimateDecayWidthNDATool(BaseTool):
 
         # Append findings (best-effort, lightweight index)
         try:
+            if not self.record_finding:
+                return json.dumps(result, separators=(",", ":"), ensure_ascii=False)
             process_label = self.process_label or "decay"
             entries = [f"Method: {method}"]
             entries.append(f"Width: {best_width:.4e} GeV")

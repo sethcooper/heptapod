@@ -13,6 +13,8 @@ from typing import Dict, Optional
 from orchestral.tools.base.tool import BaseTool
 from orchestral.tools.base.field_utils import RuntimeField, StateField
 
+from tools import event_io
+
 SCHEMA_VERSION = "parentflux-1.0"
 MANIFEST_SCHEMA_VERSION = "parentflux-manifest-1.0"
 WEIGHT_CONVENTION = "per_inelastic_collision"
@@ -20,8 +22,8 @@ WEIGHT_CONVENTION = "per_inelastic_collision"
 
 class HarvestForwardFluxTool(BaseTool):
     """
-    Harvest a forward parent-hadron flux from a Pythia event sample (schema
-    "evtjsonl-1.0" from PythiaFromRunCardTool): select the declared parent
+    Harvest a forward parent-hadron flux from a Pythia event sample (the
+    events.root or events.jsonl PythiaFromRunCardTool writes): select the declared parent
     species in a forward angular window and write one weighted flux file per
     species. Step 1 of the reach chain
     `pythia -> HARVEST -> MesonDecayToLLP -> DecayInVolume`. Parents must be
@@ -44,7 +46,8 @@ class HarvestForwardFluxTool(BaseTool):
     """
 
     pythia_events_path: str = RuntimeField(
-        description="Line-delimited JSON Pythia events (evtjsonl-1.0)")
+        description="Pythia event dataset from PythiaFromRunCardTool "
+                    "(events.root, or events.jsonl in the evtjsonl-1.0 schema)")
     parents: Dict[str, str] = RuntimeField(
         description="Map PID -> channel name (positive PID; sign folded), "
                     "e.g. {'321':'K','411':'D','431':'Ds'}")
@@ -197,16 +200,13 @@ class HarvestForwardFluxTool(BaseTool):
         fold = bool(self.fold_hemispheres)
 
         # ----------------------- scan the events ----------------------- #
+        # Read through the event IO layer, in chunks, so either format works
+        # and a sample larger than memory is still a single pass. The columnar
+        # layout spells energy "e"; the evtjsonl-1.0 schema spelled it "E".
         try:
-            with open(src) as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    rec = json.loads(line)
+            for chunk in event_io.iter_events(src):
+                for parts in chunk["prt"].to_list():
                     n_events += 1
-                    data = rec.get("data", rec)
-                    parts = data.get("particles", [])
                     for p in parts:
                         pid = abs(int(p["id"]))
                         name = pid_to_name.get(pid)
@@ -226,17 +226,18 @@ class HarvestForwardFluxTool(BaseTool):
                             if seen[name] % ps != 0:
                                 continue
                         buffers[name].append(
-                            (float(p["E"]), px, py, pz_used))
+                            (float(p["e"]), px, py, pz_used))
         except KeyError as e:
             return self.format_error(
                 error="Event Format Error",
                 reason=f"event record missing field {e}",
-                suggestion="Expected evtjsonl-1.0 with data.particles[].id/"
-                           "px/py/pz/E")
+                suggestion="Expected a PythiaFromRunCardTool dataset whose "
+                           "particles carry id/px/py/pz/E")
         except Exception as e:
             return self.format_error(
                 error="Read Error", reason=str(e),
-                suggestion="Verify the events file is evtjsonl-1.0 JSONL")
+                suggestion="Verify the events file is a .root or .jsonl "
+                           "dataset from PythiaFromRunCardTool")
 
         if n_gen <= 0:
             n_gen = n_events

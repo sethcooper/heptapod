@@ -13,13 +13,42 @@ from orchestral.tools.base.field_utils import RuntimeField, StateField
 SCHEMA_VERSION = "nda-phasespace-1.0"
 
 
+def two_body_phase_space(M: float, m1: float, m2: float) -> float:
+    """Phi_2 = lambda^(1/2)(M^2, m1^2, m2^2) / (8 pi M^2); 1/(8 pi) when massless."""
+    lam = (M**2 - (m1 + m2)**2) * (M**2 - (m1 - m2)**2)
+    return math.sqrt(max(lam, 0.0)) / (8.0 * math.pi * M**2)
+
+
+def massive_phase_space(M: float, masses: List[float], points: int = 48) -> float:
+    """n-body phase-space volume with final-state masses, by the recursion
+    Phi_n(M) = int ds/(2 pi) Phi_2(M; sqrt(s), m_n) Phi_{n-1}(sqrt(s); m_1..m_{n-1})
+    over (sum_{i<n} m_i)^2 <= s <= (M - m_n)^2 (Gauss-Legendre). Same
+    normalization as the massless formula, which it reproduces when all
+    masses vanish."""
+    if len(masses) == 2:
+        return two_body_phase_space(M, masses[0], masses[1])
+    *rest, last = masses
+    lo, hi = sum(rest) ** 2, (M - last) ** 2
+    if hi <= lo:
+        return 0.0
+    from numpy.polynomial.legendre import leggauss
+    nodes, weights = leggauss(points)
+    total = 0.0
+    for x, w in zip(nodes, weights):
+        s = lo + (hi - lo) * (x + 1.0) / 2.0
+        inner = massive_phase_space(math.sqrt(s), rest, max(12, points // 2))
+        total += w * two_body_phase_space(M, math.sqrt(s), last) * inner
+    return total * (hi - lo) / 2.0 / (2.0 * math.pi)
+
+
 class EstimatePhaseSpaceTool(BaseTool):
     """
-    Estimates n-body phase space volume for massless final states.
+    Estimates n-body phase space volume.
 
     This tool calculates the Lorentz-invariant phase space (LIPS) volume
-    for n-body decays assuming massless final state particles. It uses
-    the formula from Eq. A.2 of arXiv:1402.1178:
+    for n-body decays. Massless final states use the formula from Eq. A.2
+    of arXiv:1402.1178 (with final-state masses, the exact massive volume is
+    returned and the massless one reported as phase_space_volume_massless):
 
     Φ_n(M) = (1 / (2^(4n-5) π^(2n-3))) x (M^(2n-4) / (n-1)!(n-2)!)
 
@@ -36,7 +65,8 @@ class EstimatePhaseSpaceTool(BaseTool):
     Behavior:
       1. Validates that n >= 2
       2. Calculates phase space volume using the massless approximation
-      3. Optionally applies mass corrections if final_state_masses provided
+      3. With final_state_masses, returns the massive volume (recursive 2-body
+         factorization) and the suppression relative to massless
       4. Returns LaTeX formula showing the scaling
 
     Output (JSON):
@@ -235,5 +265,12 @@ class EstimatePhaseSpaceTool(BaseTool):
             "scaling": scaling,                 # M^(2n-4)
             "n_body": self.n_body,
         }
+        # With final-state masses, the volume is the massive one; the massless
+        # formula and the threshold suppression are reported alongside.
+        if self.final_state_masses_gev and any(m > 0 for m in self.final_state_masses_gev):
+            massive = massive_phase_space(self.mother_mass_gev, list(self.final_state_masses_gev))
+            result["phase_space_volume"] = massive
+            result["phase_space_volume_massless"] = phi_n
+            result["mass_suppression"] = massive / phi_n
 
         return json.dumps(result, separators=(",", ":"), ensure_ascii=False)

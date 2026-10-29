@@ -130,20 +130,31 @@ _ALLOWED_NODES = (
 )
 
 
+#: cmath functions a decays.py width may call, and the plain names it may
+#: call: the UFO function_library's (re, im, sec, csc, cot,
+#: complexconjugate) and abs. All are pure arithmetic. MadGraph's MSSM
+#: writes Higgs widths with cmath.cos and cmath.sin of mixing angles.
+_CMATH_CALLS = {"sqrt", "cos", "sin", "tan", "acos", "asin", "atan", "exp", "log"}
+_NAME_CALLS = {"abs", "complexconjugate", "re", "im", "sec", "csc", "cot"}
+
+
 def _verify_expr(node: ast.AST) -> None:
     for n in ast.walk(node):
         if not isinstance(n, _ALLOWED_NODES):
             raise ValueError(f"disallowed syntax in width expr: {type(n).__name__}")
         if isinstance(n, ast.Attribute):
-            if not (isinstance(n.value, ast.Name) and n.value.id == "cmath"):
-                raise ValueError("only cmath.* attributes allowed")
+            # Named cmath members only: `cmath.__dict__` and the like reach
+            # far beyond arithmetic.
+            if not (isinstance(n.value, ast.Name) and n.value.id == "cmath"
+                    and n.attr in _CMATH_CALLS | {"pi", "e"}):
+                raise ValueError(f"disallowed attribute in width expr: {ast.unparse(n)}")
         if isinstance(n, ast.Call):
             f = n.func
-            ok = (isinstance(f, ast.Name) and f.id in {"abs", "complexconjugate"}) or (
+            ok = (isinstance(f, ast.Name) and f.id in _NAME_CALLS) or (
                 isinstance(f, ast.Attribute)
                 and isinstance(f.value, ast.Name)
                 and f.value.id == "cmath"
-                and f.attr in {"sqrt"}
+                and f.attr in _CMATH_CALLS
             )
             if not ok:
                 raise ValueError("disallowed function call in width expr")
@@ -152,8 +163,8 @@ def _verify_expr(node: ast.AST) -> None:
 def safe_eval_width(expr: str, params: Dict[str, float]) -> float:
     """Evaluate a UFO partial-width expression to a real number.
 
-    Locked namespace (parameters + cmath + abs + a real ``complexconjugate``);
-    the AST is whitelist-verified first. Returns the real part (widths are real).
+    Locked namespace (parameters + cmath + the whitelisted helpers); the AST
+    is whitelist-verified first. Returns the real part (widths are real).
     """
     tree = ast.parse(expr, mode="eval")
     _verify_expr(tree)
@@ -161,6 +172,11 @@ def safe_eval_width(expr: str, params: Dict[str, float]) -> float:
     ns["cmath"] = cmath
     ns["abs"] = abs
     ns["complexconjugate"] = lambda z: z.conjugate() if isinstance(z, complex) else z
+    ns["re"] = lambda z: complex(z).real
+    ns["im"] = lambda z: complex(z).imag
+    ns["sec"] = lambda z: 1 / cmath.cos(z)
+    ns["csc"] = lambda z: 1 / cmath.sin(z)
+    ns["cot"] = lambda z: 1 / cmath.tan(z)
     result = eval(compile(tree, "<width>", "eval"), {"__builtins__": {}}, ns)  # noqa: S307
     return float(getattr(result, "real", result))
 

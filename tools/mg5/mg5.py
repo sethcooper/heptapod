@@ -77,39 +77,119 @@ def _grep_lhe_from_log(log_path: str) -> Optional[str]:
     return None
 
 
-def _parse_width_from_log(log_path: str) -> Optional[dict[str, float]]:
-    """Extract decay width from MadGraph log (useful for nevents=0 runs).
+_NUM = r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
+_SUMMARY_RE = re.compile(r"=== Results Summary for run:\s*(\S+)")
+_WIDTH_RE = re.compile(r"Width\s*:\s*" + _NUM + r"\s*\+-\s*" + _NUM + r"\s*GeV")
+_XSEC_RE = re.compile(r"Cross-section\s*:\s*" + _NUM + r"\s*\+-\s*" + _NUM + r"\s*pb")
+_NEVENTS_RE = re.compile(r"Nb of events\s*:\s*(\d+)")
+_INDEX_HTML_RE = re.compile(r"more information in\s+(\S+?)/index\.html")
 
-    MadGraph prints the width as:
-        Width :   1.157e-23 +- 3.28e-25 GeV
-    or cross section as:
-        Cross-section :   1.234e+02 +- 5.67e+00 pb
 
-    Returns dict with width_gev/cross_section_pb and error, or None.
+def _parse_run_summary(log_path: str) -> Optional[dict]:
+    """Return the *final* MG5 results summary in the log.
+
+    MG5 prints a "=== Results Summary for run: ... ===" block after the
+    survey (``Nb of events : 0``) and again after refine/combine with the
+    final width or cross section and the number of unweighted events.  The
+    last block is the one that describes the stored run; the survey block
+    must never be reported as the result.
+
+    Returns a dict with ``width_gev``/``width_gev_error`` or
+    ``cross_section_pb``/``cross_section_pb_error``, plus ``nevents`` and
+    ``run_name`` when printed, or None if the log holds no summary.
     """
-    import re
     try:
-        with open(log_path, "r", encoding="utf-8") as fp:
-            content = fp.read()
+        with open(log_path, "r", encoding="utf-8", errors="replace") as fp:
+            content = _ANSI_RE.sub("", fp.read())
+    except Exception:
+        return None
 
-        # Look for "Width :" line (decay processes)
-        m = re.search(r"Width\s*:\s*([\d.eE+-]+)\s*\+-\s*([\d.eE+-]+)\s*GeV", content)
-        if m:
-            return {
-                "width_gev": float(m.group(1)),
-                "width_gev_error": float(m.group(2)),
-            }
+    # Split into summary blocks; fall back to the whole log when MG5 printed
+    # bare "Width :" lines without the header.
+    heads = list(_SUMMARY_RE.finditer(content))
+    if heads:
+        blocks = [(m.group(1), content[m.end():(heads[i + 1].start() if i + 1 < len(heads) else len(content))])
+                  for i, m in enumerate(heads)]
+    else:
+        blocks = [(None, content)]
 
-        # Look for "Cross-section :" line (scattering processes)
-        m = re.search(r"Cross-section\s*:\s*([\d.eE+-]+)\s*\+-\s*([\d.eE+-]+)\s*pb", content)
-        if m:
-            return {
-                "cross_section_pb": float(m.group(1)),
-                "cross_section_pb_error": float(m.group(2)),
-            }
+    for run_name, block in reversed(blocks):
+        info: dict = {}
+        widths = _WIDTH_RE.findall(block)
+        xsecs = _XSEC_RE.findall(block)
+        if widths:
+            info["width_gev"] = float(widths[-1][0])
+            info["width_gev_error"] = float(widths[-1][1])
+        elif xsecs:
+            info["cross_section_pb"] = float(xsecs[-1][0])
+            info["cross_section_pb_error"] = float(xsecs[-1][1])
+        else:
+            continue
+        nev = _NEVENTS_RE.findall(block)
+        if nev:
+            info["nevents"] = int(nev[-1])
+        if run_name:
+            info["run_name"] = run_name
+        return info
+    return None
+
+
+def _parse_width_from_log(log_path: str) -> Optional[dict[str, float]]:
+    """Width/cross section (and error) from the final results summary."""
+    info = _parse_run_summary(log_path)
+    if info is None:
+        return None
+    return {k: v for k, v in info.items()
+            if k in ("width_gev", "width_gev_error", "cross_section_pb", "cross_section_pb_error")}
+
+
+def _process_dirs(card_text: str, outdir: str, log_path: str) -> list:
+    """Candidate MG5 process directories for this run.
+
+    ``output``/``launch`` may name a directory outside data_dir (an absolute
+    path, or one relative to the run cwd), so searching data_dir alone misses
+    the LHE.  Collect the directories the card and the log name.
+    """
+    dirs = []
+    for line in card_text.splitlines():
+        toks = line.split("#", 1)[0].split()
+        if len(toks) >= 2 and toks[0] in ("output", "launch"):
+            args = [t for t in toks[1:] if not t.startswith("-")]
+            if toks[0] == "output" and args and args[0] in (
+                    "madevent", "standalone", "standalone_cpp", "madweight", "pythia8", "aloha", "matchbox"):
+                args = args[1:]
+            if args:
+                dirs.append(args[0])
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as fp:
+            for m in _INDEX_HTML_RE.finditer(_ANSI_RE.sub("", fp.read())):
+                dirs.append(m.group(1))
     except Exception:
         pass
-    return None
+    out = []
+    for d in dirs:
+        full = os.path.abspath(d if os.path.isabs(d) else os.path.join(outdir, d))
+        if os.path.isdir(full) and full not in out:
+            out.append(full)
+    return out
+
+
+def _locate_lhe(outdir: str, card_text: str, log_path: str,
+                run_name: Optional[str] = None) -> Optional[str]:
+    """Find the run's unweighted_events.lhe[.gz], preferring Events/<run_name>."""
+    roots = _process_dirs(card_text, outdir, log_path)
+    if run_name:
+        for root in roots + [outdir]:
+            for r, _d, fnames in os.walk(root):
+                if os.path.basename(r) == run_name and os.path.basename(os.path.dirname(r)) == "Events":
+                    for fn in sorted(fnames):
+                        if fn.startswith("unweighted_events.lhe"):
+                            return os.path.join(r, fn)
+    for root in [outdir] + roots:
+        cand = _find_lhe_in_tree(root)
+        if cand:
+            return cand
+    return _grep_lhe_from_log(log_path)
 
 
 def _safe_join(base_dir: str, rel_path: str) -> Optional[str]:
@@ -494,6 +574,33 @@ def _edit_mg5_card(card_text: str, *, ufo_path: Optional[str] = None,
     return result
 
 
+_SETUP_COMMANDS = ("import ", "generate ", "add process ", "define ", "output ", "set group_subprocesses", "set gauge")
+
+
+def _relaunch_card(card_text: str, process_dir: str, *, nevents: Optional[int] = None,
+                   seed: Optional[int] = None) -> str:
+    """A card that relaunches an existing process directory.
+
+    Keeps the run-setting lines of the template (those after its 'launch'
+    line, or every non-setup line when it has none) and drops model import,
+    process generation and output, which the compiled directory already has.
+    """
+    lines = card_text.splitlines()
+    starts = [i for i, l in enumerate(lines) if l.strip().startswith("launch")]
+    if starts:
+        body = lines[starts[0] + 1:]
+    else:
+        body = [l for l in lines if l.strip() and not l.strip().startswith(_SETUP_COMMANDS)]
+    body = [l for l in body if not l.strip().startswith("launch")]
+    text = _edit_mg5_card("\n".join(body) + "\n", nevents=nevents, seed=seed)
+    stripped = [l.strip() for l in text.splitlines()]
+    if nevents is not None and not any(l.startswith("set nevents") for l in stripped):
+        text += f"set nevents {nevents}\n"
+    if seed is not None and not any(l.startswith("set iseed") for l in stripped):
+        text += f"set iseed {seed}\n"
+    return f"launch {process_dir}\n" + text
+
+
 # ====================================================================== #
 # ========================= MG5_aMC@NLO tool =========================== #
 # ====================================================================== #
@@ -509,6 +616,8 @@ class MadGraphFromRunCardTool(BaseTool):
       - output_name: (optional) process output directory name. If provided, replaces 'output' command.
       - nevents: (optional) number of events to generate. If provided, replaces 'set nevents' command.
       - seed: (optional) random seed. If provided, replaces 'set iseed' command.
+      - process_dir: (optional) existing process directory to relaunch with the
+        card's run settings, skipping import/generate/output.
 
     State:
       - mg5_path: absolute path to MG5_aMC install dir (contains bin/mg5_aMC)
@@ -529,6 +638,10 @@ class MadGraphFromRunCardTool(BaseTool):
     output_name: Optional[str] = RuntimeField(default=None, description="Process output directory name (replaces 'output' command)")
     nevents: Optional[int] = RuntimeField(default=None, description="Number of events to generate (replaces 'set nevents')")
     seed: Optional[int] = RuntimeField(default=None, description="Random seed (replaces 'set iseed')")
+    process_dir: Optional[str] = RuntimeField(default=None, description=(
+        "Relaunch this existing MG5 process directory (relative to base_directory) instead of building one: "
+        "the card's run settings (lines after 'launch', e.g. 'set ...') are applied and import/generate/output "
+        "are skipped. Use it for another run of a compiled process: more events, another seed, changed cuts."))
 
     # --------------------------------------------------------------------- #
 
@@ -605,13 +718,29 @@ class MadGraphFromRunCardTool(BaseTool):
                         context=self.ufo_path
                     )
 
-            card_text = _edit_mg5_card(
-                card_text,
-                ufo_path=ufo_abs,
-                output_name=self.output_name,
-                nevents=self.nevents,
-                seed=self.seed
-            )
+            if self.process_dir is not None:
+                process_abs = _safe_join(self.base_directory, self.process_dir)
+                if process_abs is None:
+                    return self.format_error(
+                        error="Access Denied",
+                        reason="process_dir escapes base_directory",
+                        context=self.process_dir
+                    )
+                if not os.path.isfile(os.path.join(process_abs, "bin", "generate_events")):
+                    return self.format_error(
+                        error="Path Not Found",
+                        reason="process_dir is not an MG5 process directory (no bin/generate_events)",
+                        context=self.process_dir
+                    )
+                card_text = _relaunch_card(card_text, process_abs, nevents=self.nevents, seed=self.seed)
+            else:
+                card_text = _edit_mg5_card(
+                    card_text,
+                    ufo_path=ufo_abs,
+                    output_name=self.output_name,
+                    nevents=self.nevents,
+                    seed=self.seed
+                )
         except Exception as e:
             return self.format_error(
                 error="Card Edit Error",
@@ -663,11 +792,12 @@ class MadGraphFromRunCardTool(BaseTool):
                 proc.wait()
                 raise
         watcher.poll(self, finished=proc.returncode == 0)
+        summary = _parse_run_summary(log_local_path) or {}
+        run_name = summary.pop("run_name", None)
         if proc.returncode != 0:
             # MG5 may exit nonzero on nevents=0 (ZeroDivisionError) but the
             # width is still computed and logged.  Check for it before failing.
-            width_info = _parse_width_from_log(log_local_path)
-            if width_info is not None:
+            if summary:
                 result = {
                     "status": "ok",
                     "scan_detected": False,
@@ -676,7 +806,7 @@ class MadGraphFromRunCardTool(BaseTool):
                     "lhe_file": None,
                     "note": "mg5 exited nonzero but width/cross-section was computed (likely nevents=0)",
                 }
-                result.update(width_info)
+                result.update(summary)
                 return json.dumps(result, separators=(",", ":"), ensure_ascii=False)
 
             return self.format_error(
@@ -686,27 +816,42 @@ class MadGraphFromRunCardTool(BaseTool):
                 context=f"log={os.path.relpath(log_local_path, self.base_directory)}"
             )
 
-        # Try to locate LHE file and detect parameter scans.
-        lhe_candidate = _find_lhe_in_tree(outdir)
-        if lhe_candidate is None:
-            lhe_candidate = _grep_lhe_from_log(log_local_path)
+        # Locate the LHE: data_dir, then the process directory named by the
+        # card's output/launch line or the log (it may sit outside data_dir).
+        lhe_candidate = _locate_lhe(outdir, card_text, log_local_path, run_name)
 
         if lhe_candidate is None:
             # No LHE file — but for nevents=0 runs, the width/cross-section
             # is still printed in the log.  Extract it if available.
-            width_info = _parse_width_from_log(log_local_path)
-            if width_info is not None:
+            if summary:
                 result = {
                     "status": "ok",
                     "scan_detected": False,
                     "data_dir": os.path.relpath(outdir, self.base_directory),
                     "log_file": os.path.relpath(log_local_path, self.base_directory),
                     "lhe_file": None,
-                    "note": "nevents=0: no events generated, width/cross-section extracted from log",
                 }
-                result.update(width_info)
+                result.update(summary)
+                if summary.get("nevents", 0) == 0:
+                    result["note"] = "nevents=0: no events generated, width/cross-section extracted from log"
+                else:
+                    result["status"] = "warning"
+                    result["note"] = (
+                        f"MG5 reports {summary['nevents']} events but unweighted_events.lhe "
+                        f"was not found; check the process directory named in the card/log"
+                    )
                 return json.dumps(result, separators=(",", ":"), ensure_ascii=False)
 
+            launched = any(ln.strip().split()[:1] == ["launch"] for ln in card_text.splitlines())
+            if not launched:
+                return self.format_error(
+                    error="No Launch",
+                    reason="The card never launches a run, so there are no events and no "
+                           "integration to report (compute_widths alone writes a param card, "
+                           "not events)",
+                    suggestion="This tool reports a launched run: for a partial width, "
+                               "generate the channel (e.g. 'generate n1 > ve z z'), output and launch it"
+                )
             return self.format_error(
                 error="Output Missing",
                 reason="Could not locate unweighted_events.lhe",
@@ -734,7 +879,9 @@ class MadGraphFromRunCardTool(BaseTool):
 
         if events_dir:
             scan_runs = _detect_scan_runs(events_dir)
-            scan_detected = len(scan_runs) > 0
+            # Several run_XX directories are a scan only when the card asked for
+            # one: a relaunched process directory keeps its earlier runs.
+            scan_detected = len(scan_runs) > 0 and re.search(r"\bscan\d*:", card_text) is not None
 
             if scan_detected:
                 # Look for scan summary file (e.g., scan_run_0[1-3].txt)
@@ -758,6 +905,8 @@ class MadGraphFromRunCardTool(BaseTool):
             "tool": "MadGraphFromCardTool",
             "scan_detected": scan_detected,
         }
+        if summary and not scan_detected:
+            manifest["results"] = dict(summary)
 
         if scan_detected:
             manifest["outputs"]["scan_runs"] = scan_runs
@@ -777,6 +926,10 @@ class MadGraphFromRunCardTool(BaseTool):
             "manifest_json": os.path.relpath(manifest_path, self.base_directory),
             "log_file": os.path.relpath(log_local_path, self.base_directory),
         }
+        # Final (post-refine) width / cross section, error and event count.
+        # For a scan the per-point values are in runs[] instead.
+        if not scan_detected:
+            result.update(summary)
 
         # If scan detected, add detailed scan information
         if scan_detected and events_dir:

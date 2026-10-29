@@ -25,7 +25,7 @@ import re
 import signal
 import subprocess
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 from orchestral.tools.base.tool import BaseTool
 from orchestral.tools.base.field_utils import RuntimeField, StateField
@@ -378,8 +378,9 @@ def _invoke_generator(
     timeout_sec: int,
     base_directory: str,
     extra_args: list,
+    driver_name: str = "UFO_generator.wl",
 ) -> Tuple[Optional[subprocess.CompletedProcess], str, str, Optional[str]]:
-    """Run UFO_generator.wl and capture its logs.
+    """Run UFO_generator.wl (or another driver here) and capture its logs.
 
     Args:
         wolframscript_path: Command or absolute path to wolframscript.
@@ -390,12 +391,13 @@ def _invoke_generator(
         timeout_sec: Walltime limit for the Mathematica run.
         base_directory: Working directory for the subprocess.
         extra_args: Additional ``Key=value`` arguments for the script.
+        driver_name: The driver script, in this directory.
 
     Returns:
         ``(proc, stdout_path, stderr_path, error)``. On failure to launch,
         ``proc`` is None and ``error`` describes why.
     """
-    driver = Path(__file__).parent / "UFO_generator.wl"
+    driver = Path(__file__).parent / driver_name
     if not driver.exists():
         return None, "", "", f"{driver} not found"
 
@@ -477,7 +479,7 @@ class _FeynRulesToolBase(BaseTool):
     """
 
     # --------------------------- Runtime fields --------------------------- #
-    model_path: str = RuntimeField(
+    model_path: Optional[str] = RuntimeField(
         default=None, description="Path to FeynRules .fr model file")
     lagrangian: Optional[str] = RuntimeField(
         default=None,
@@ -690,8 +692,18 @@ class FeynRulesToUFOTool(_FeynRulesToolBase):
             "Abort before writing the UFO if a consistency check fails that the "
             "SM baseline passes (default false)"))
 
+    toy_spec: Optional[Union[Dict[str, Any], str]] = RuntimeField(
+        default=None,
+        description=("Instead of model_path: a WriteToyModel spec (name, gauge, fields, parameters, "
+                     "interactions); the .fr is written and compiled with its lagrangian and load_sm"))
+
     def _run(self) -> str:
         """Compile the model to a UFO and report what was produced."""
+        if self.toy_spec is not None:
+            from .toy_model import apply_toy_spec
+            err = apply_toy_spec(self, self.toy_spec, self._abs_path("."), "ToyModel")
+            if err:
+                return self.format_error(error="Invalid Model Spec", reason=err)
         if not self.model_path:
             return self.format_error(
                 error="Missing Parameter", reason="model_path is required")
@@ -700,6 +712,25 @@ class FeynRulesToUFOTool(_FeynRulesToolBase):
                 error="Missing Parameter", reason="output_dir is required")
 
         abs_model = self._abs_path(self.model_path)
+        if not os.path.isfile(abs_model):
+            return self.format_error(
+                error="Model Not Found",
+                reason=f"no file at {abs_model} (model_path is resolved against the "
+                       f"sandbox, {self.base_directory})")
+        if os.path.isfile(abs_model):
+            # What FeynRules would misread without an error (it falls back
+            # to SM.fr's fields and writes a UFO without the model's own).
+            from .feynarts_model import fr_syntax_problems, TOY_TEMPLATE, template_text
+            # Lines that drop part of a sum are reported with the result, not
+            # refused here: existing models (the feynrules skill's own template
+            # had two) compile, only without those terms.
+            problems = fr_syntax_problems(Path(abs_model).read_text(errors="replace"),
+                                          self.load_sm is not False, dangling=False)
+            if problems:
+                return self.format_error(
+                    error="Invalid FeynRules Model",
+                    reason="; ".join(problems) + f". A worked standalone model: {TOY_TEMPLATE}."
+                           + template_text(self.load_sm is not False))
         abs_out = self._abs_path(self.output_dir)
         abs_fr = self._abs_path(self.feynrules_path) if self.feynrules_path else None
         self._ensure_dir(abs_out)
@@ -785,12 +816,24 @@ class FeynRulesToUFOTool(_FeynRulesToolBase):
                     f"may contain no interaction terms, or vertex extraction "
                     f"failed -- see {stdout_path}"
                 )
+                msgs = [m for m in dict.fromkeys(
+                    ln.strip() for ln in (proc.stdout or "").splitlines()
+                    if re.match(r"^[\w`$]+::\w+:", ln.strip()))][:6]
+                if msgs:
+                    reason += f". FeynRules' messages: {msgs}"
             if reason is None:
                 reason = self._stdout_hint(proc) or (
                     f"wolframscript returned exit status {proc.returncode}")
             summary["error"] = reason
             return self.format_error(error="UFO Generation Failed", reason=reason)
 
+        from .feynarts_model import dangling_lines
+        lost = dangling_lines(Path(abs_model).read_text(errors="replace")) if os.path.isfile(abs_model) else []
+        if lost:
+            summary.setdefault("warnings", []).append(
+                f".fr lines {lost[:5]} start with + or - outside any bracket: Mathematica ended the "
+                "statement on the line before, so those terms are NOT in the Lagrangian. Move the "
+                "operator to the end of the previous line")
         self._record_finding(abs_model, abs_out, checks)
         return json.dumps(summary, indent=2)
 
@@ -858,6 +901,11 @@ By default it checks hermiticity, diagonal kinetic terms, diagonal mass
                 error="Missing Parameter", reason="model_path is required")
 
         abs_model = self._abs_path(self.model_path)
+        if not os.path.isfile(abs_model):
+            return self.format_error(
+                error="Model Not Found",
+                reason=f"no file at {abs_model} (model_path is resolved against the "
+                       f"sandbox, {self.base_directory})")
         abs_fr = self._abs_path(self.feynrules_path) if self.feynrules_path else None
         log_dir = self._abs_path(self.log_dir) if self.log_dir else str(
             Path(self.base_directory) / "_logs" / "feynrules_validate")

@@ -17,6 +17,7 @@ where arXiv has it, and that tool where it does not.
 """
 
 import hashlib
+import http.client
 import os
 import re
 import threading
@@ -38,6 +39,14 @@ _MIN_REQUEST_INTERVAL = 3.0
 
 # Cap on downloaded PDF size (defensive; arXiv PDFs are rarely > a few tens of MB).
 _MAX_PDF_BYTES = 100 * 1024 * 1024
+
+# arXiv answers bursts with 429 (or 503) and sometimes cuts a download short
+# (IncompleteRead). E-print downloads are retried after these pauses, or after
+# the server's Retry-After when it sends one, as long as the total wait stays
+# within _MAX_RETRY_WAIT seconds; then the error is raised.
+_RETRY_DELAYS = (5.0, 15.0, 45.0)
+_MAX_RETRY_WAIT = 120.0
+_RETRY_STATUS = {429, 503}
 
 # Only arXiv hosts, over HTTPS, may be fetched (avoids SSRF via arbitrary URLs).
 _ALLOWED_PDF_HOSTS = {"arxiv.org", "www.arxiv.org", "export.arxiv.org"}
@@ -61,6 +70,39 @@ def normalize_arxiv_id(arxiv_id: str) -> str:
     for fetching (fetching preserves an explicit version).
     """
     return re.sub(r"v\d+$", "", _strip_arxiv_prefix(arxiv_id))
+
+
+def split_version(arxiv_id: str) -> Tuple[str, Optional[str]]:
+    """``2103.02708v2`` -> ``("2103.02708", "v2")``; no version -> ``(id, None)``."""
+    s = _strip_arxiv_prefix(arxiv_id)
+    m = re.match(r"^(.*?)(v\d+)$", s)
+    return (m.group(1), m.group(2)) if m else (s, None)
+
+
+def version_from_response(base_id: str, *texts: Optional[str]) -> Optional[str]:
+    """Find ``<base_id>vN`` in a Content-Disposition header or a URL.
+
+    arXiv names the file it serves after the version it chose
+    (``filename="2103.02708v2.pdf"``, ``"arXiv-2103.02708v2.tar.gz"``), so an
+    unversioned request still reveals which version came back.
+    """
+    flat = re.escape(base_id.replace("/", "_"))
+    raw = re.escape(base_id)
+    for t in texts:
+        if not t or not isinstance(t, str):
+            continue
+        m = re.search(rf"(?:{raw}|{flat})(v\d+)", t)
+        if m:
+            return m.group(1)
+    return None
+
+
+def arxiv_id_from_url(url: Optional[str]) -> Optional[str]:
+    """The arXiv id in an ``https://arxiv.org/{pdf,abs}/<id>[.pdf]`` URL, if any."""
+    if not url:
+        return None
+    m = re.search(r"/(?:pdf|abs|e-print|src)/(.+?)(?:\.pdf)?/?$", urlparse(url).path or "")
+    return validate_arxiv_id(m.group(1)) if m else None
 
 
 def validate_arxiv_id(arxiv_id: str) -> Optional[str]:
@@ -100,6 +142,18 @@ def https_arxiv_url(url: Optional[str]) -> Optional[str]:
     return url
 
 
+def _response_meta(resp: Any, fallback_url: str) -> Tuple[str, Optional[str]]:
+    """(final URL after redirects, Content-Disposition) of a response."""
+    url = getattr(resp, "url", None)
+    headers = getattr(resp, "headers", None) or {}
+    try:
+        disp = headers.get("Content-Disposition") or headers.get("content-disposition")
+    except AttributeError:
+        disp = None
+    return (url if isinstance(url, str) and url else fallback_url,
+            disp if isinstance(disp, str) else None)
+
+
 class _MinIntervalLimiter:
     """Serialize requests so consecutive calls are >= ``interval`` seconds apart."""
 
@@ -121,6 +175,51 @@ class _MinIntervalLimiter:
             return waited
 
 
+def _sleep(seconds: float) -> None:
+    """The pause between retries (tests replace it)."""
+    time.sleep(seconds)
+
+
+def _retryable(exc: BaseException) -> bool:
+    """A rate-limit or server-busy status, or a download cut short."""
+    if isinstance(exc, requests.HTTPError):
+        return getattr(exc.response, "status_code", None) in _RETRY_STATUS
+    if isinstance(exc, (requests.exceptions.ChunkedEncodingError, http.client.IncompleteRead)):
+        return True
+    return "IncompleteRead" in str(exc)
+
+
+def _retry_after(exc: BaseException) -> Optional[float]:
+    """Seconds from a numeric Retry-After header on the error's response, if any."""
+    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+    try:
+        value = headers.get("Retry-After")
+        return max(0.0, float(value)) if value is not None else None
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def with_retries(fn, delays=_RETRY_DELAYS, max_wait: float = _MAX_RETRY_WAIT):
+    """``fn()``, retried after each of ``delays`` while the error is retryable.
+
+    The last error is raised once the delays are used up, the error is not
+    retryable, or the next pause would take the total wait past ``max_wait``.
+    """
+    waited = 0.0
+    for attempt in range(len(delays) + 1):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001 - classified below
+            if attempt == len(delays) or not _retryable(e):
+                raise
+            pause = _retry_after(e)
+            pause = delays[attempt] if pause is None else pause
+            if waited + pause > max_wait:
+                raise
+            _sleep(pause)
+            waited += pause
+
+
 # Module-level limiter shared across tool invocations in a process so repeated
 # arXiv calls from an agent stay polite even though each tool builds its own
 # interface instance.
@@ -132,6 +231,7 @@ class ArxivInterface:
 
     def __init__(self, timeout: float = 30.0) -> None:
         self.timeout = timeout
+        self.last_raw: Optional[str] = None  # body of the last search response
         self._session = requests.Session()
         self._session.headers.update(
             {"User-Agent": "HEPTAPOD/1.0 (Physics research tool)"}
@@ -187,7 +287,33 @@ class ArxivInterface:
         _LIMITER.wait()
         resp = self._session.get(url, timeout=self.timeout)
         resp.raise_for_status()
+        self.last_raw = resp.text
         return self._parse_feed(resp.text), url
+
+    def resolve_version(self, arxiv_id: str) -> Dict[str, Any]:
+        """Pin an arXiv id to a version: ``{"versioned_id", "request_url"}``.
+
+        An explicit ``vN`` is returned as is (``request_url`` None). Otherwise
+        the Atom metadata for the id is fetched and the version is read from
+        its ``<id>`` element, which names the current version. Raises
+        ValueError when no version can be determined.
+        """
+        valid = validate_arxiv_id(arxiv_id)
+        if not valid:
+            raise ValueError(f"Invalid arXiv id: {arxiv_id!r}")
+        base, version = split_version(valid)
+        if version:
+            return {"versioned_id": valid, "request_url": None}
+        url = f"{ARXIV_API_URL}?{urlencode({'id_list': base, 'max_results': 1})}"
+        _LIMITER.wait()
+        resp = self._session.get(url, timeout=self.timeout)
+        resp.raise_for_status()
+        for entry in ET.fromstring(resp.text).findall("atom:entry", ATOM_NS):
+            raw = self._extract_arxiv_id(entry) or ""
+            b, v = split_version(raw)
+            if v and b == base:
+                return {"versioned_id": f"{base}{v}", "request_url": url}
+        raise ValueError(f"arXiv metadata for {base!r} names no version")
 
     def _parse_feed(self, xml_text: str) -> List[Dict[str, Any]]:
         root = ET.fromstring(xml_text)
@@ -218,10 +344,11 @@ class ArxivInterface:
             and name_el.text
         ]
 
-        arxiv_id = self._extract_arxiv_id(entry)
-        if not arxiv_id:
+        raw_id = self._extract_arxiv_id(entry)
+        if not raw_id:
             return None
-        arxiv_id = normalize_arxiv_id(arxiv_id) or arxiv_id
+        arxiv_id = normalize_arxiv_id(raw_id) or raw_id
+        _, version = split_version(raw_id)
 
         categories: List[str] = []
         primary = entry.find("arxiv:primary_category", ATOM_NS)
@@ -245,6 +372,11 @@ class ArxivInterface:
 
         return {
             "arxiv_id": arxiv_id,
+            # The Atom <id> names the version the metadata describes (the
+            # latest at query time); evidence must cite that, not the bare id.
+            "version": version,
+            "versioned_id": f"{arxiv_id}{version}" if version else None,
+            "source_id": f"arXiv:{arxiv_id}{version}" if version else None,
             "title": title,
             "authors": authors,
             "abstract": abstract,
@@ -299,12 +431,14 @@ class ArxivInterface:
 
         _LIMITER.wait()
         tmp = dest_path + ".part"
+        final_url, disposition = pdf_url, None
         digest = hashlib.sha256()
         total = 0
         header = b""
         validated = False
         with self._session.get(pdf_url, timeout=self.timeout, stream=True) as resp:
             resp.raise_for_status()
+            final_url, disposition = _response_meta(resp, pdf_url)
             try:
                 with open(tmp, "wb") as fh:
                     for chunk in resp.iter_content(chunk_size=65536):
@@ -341,7 +475,8 @@ class ArxivInterface:
             if os.path.exists(tmp):
                 os.remove(tmp)
             raise
-        return {"bytes": total, "sha256": digest.hexdigest()}
+        return {"bytes": total, "sha256": digest.hexdigest(), "url": pdf_url,
+                "final_url": final_url, "content_disposition": disposition}
 
     # ------------------------ E-print retrieval ----------------------- #
 
@@ -356,6 +491,8 @@ class ArxivInterface:
         sources, gzipped single ``.tex``, or a bare PDF when no source exists),
         streaming with a size cap. Returns ``{"data": bytes, "sha256": str,
         "bytes": int}``; the caller classifies via source_archive.detect_payload.
+        Rate limiting (429/503) and truncated downloads are retried with
+        backoff (see ``with_retries``) before the error is raised.
         """
         valid = validate_arxiv_id(arxiv_id)
         if not valid:
@@ -363,12 +500,16 @@ class ArxivInterface:
         url = f"https://export.arxiv.org/e-print/{valid}"
         if not is_allowed_arxiv_url(url):  # defensive; host is ours by construction
             raise ValueError(f"Refusing non-arXiv URL: {url!r}")
+        return with_retries(lambda: self._fetch_eprint(url, max_bytes))
 
+    def _fetch_eprint(self, url: str, max_bytes: int) -> Dict[str, Any]:
+        """One attempt at downloading the e-print at ``url``."""
         _LIMITER.wait()
         digest = hashlib.sha256()
         buf = bytearray()
         with self._session.get(url, timeout=self.timeout, stream=True) as resp:
             resp.raise_for_status()
+            final_url, disposition = _response_meta(resp, url)
             for chunk in resp.iter_content(chunk_size=65536):
                 if not chunk:
                     continue
@@ -378,4 +519,5 @@ class ArxivInterface:
                 digest.update(chunk)
         if not buf:
             raise ValueError("e-print payload is empty")
-        return {"data": bytes(buf), "sha256": digest.hexdigest(), "bytes": len(buf)}
+        return {"data": bytes(buf), "sha256": digest.hexdigest(), "bytes": len(buf),
+                "url": url, "final_url": final_url, "content_disposition": disposition}

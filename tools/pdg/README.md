@@ -14,6 +14,35 @@ This tool provides agent-friendly access to official PDG data via the `pdg` Pyth
 - Quantum numbers (spin, parity, charge)
 - Experimental limits (e.g., photon mass limit)
 
+## Citing a value
+
+Every mass, width and lifetime carries where it comes from: `pdgid` (the PDG
+identifier of the quantity, e.g. `S044W`), `edition` (e.g. `2026`), `display`
+(the value as the Review prints it, e.g. `2.4955 ± 0.0023 GeV`,
+`(290.3 ± 0.5) × 10^-15 s`), asymmetric `error_plus`/`error_minus` in the
+returned unit, and `url` (the pdgLive page). Branching fractions carry `pdgid`
+and `url`.
+
+## Provenance
+
+Every result carries a top-level `provenance` object:
+
+```
+{"call_id": "<Tool>-<yyyymmddTHHMMSSZ>-<8 hex>", "tool", "retrieved_at",
+ "request", "request_url", "api": {"name", "version"}, "from_cache",
+ "cached_at", "source_ids", "response_sha256", "saved_path"}
+```
+
+plus `files` (`[{"path", "sha256", "bytes"}]`) when the call downloaded or
+wrote files. The raw response is saved to `research/calls/<call_id>.<ext>`
+under `base_directory` (`saved_path`, hashed by `response_sha256`), and one
+line with the same fields (`ts` for `retrieved_at`) is appended to
+`research/calls.jsonl`. The recorder is `tools/provenance.py`.
+
+For PDG, `source_ids` are `PDG:<pdgid>/<edition>` (e.g. `PDG:S044W/2026`) for
+every quantity in the result, `api` is the `pdg` package version and Review
+edition, and `request_url` is null: the PDG API reads a local SQLite file.
+
 ## Quick Start
 
 ### Direct Python Usage

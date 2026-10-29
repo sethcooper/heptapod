@@ -17,6 +17,7 @@ import argparse
 import io
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -68,9 +69,12 @@ _ATOM_FIXTURE = """<?xml version="1.0" encoding="UTF-8"?>
 class _FakeStreamResponse:
     """Minimal stand-in for a streaming ``requests`` Response context manager."""
 
-    def __init__(self, content: bytes, status: int = 200):
+    def __init__(self, content: bytes, status: int = 200, headers=None, url=None):
         self._content = content
         self.status_code = status
+        self.headers = headers or {}
+        self.url = url
+        self.text = content.decode("utf-8", "replace")
 
     def raise_for_status(self):
         import requests
@@ -87,6 +91,27 @@ class _FakeStreamResponse:
 
     def __exit__(self, *exc):
         return False
+
+
+def _router(payload: bytes, version: str = "v1"):
+    """``Session.get`` side effect: Atom metadata naming ``version`` for
+    id_list queries, otherwise ``payload`` named after that version (as
+    arXiv's Content-Disposition does)."""
+    from urllib.parse import parse_qs, urlparse
+
+    def get(self, url, **kw):
+        if "api/query" in url:
+            arxiv_id = parse_qs(urlparse(url).query)["id_list"][0]
+            feed = _ATOM_FIXTURE.replace("2103.02708v2", f"{arxiv_id}{version}")
+            return _FakeStreamResponse(feed.encode())
+        arxiv_id = url.rstrip("/").split("/", 4)[-1].removesuffix(".pdf")
+        name = arxiv_id if re.search(r"v\d+$", arxiv_id) else arxiv_id + version
+        return _FakeStreamResponse(
+            payload, url=url,
+            headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'},
+        )
+
+    return get
 
 
 def test_query_builder() -> bool:
@@ -124,7 +149,7 @@ def test_arxiv_search_live() -> bool:
         print(f"[i] Skipping live search (network unavailable): {result.get('reason')}\n")
         return True
     assert result["count"] >= 1, result
-    assert result["papers"][0].get("arxiv_id"), result
+    assert result["papers"][0].get("id"), result
     print(f"[✓] Live search returned {result['count']} papers\n")
     return True
 
@@ -149,6 +174,7 @@ def test_atom_parsing() -> bool:
     assert len(papers) == 1, papers
     p = papers[0]
     assert p["arxiv_id"] == "2103.02708", p  # version stripped for canonical id
+    assert p["version"] == "v2" and p["source_id"] == "arXiv:2103.02708v2", p
     assert p["title"] == "A scalar leptoquark model", p
     assert p["authors"] == ["Jane Physicist", "John Theorist"], p
     assert p["categories"][0] == "hep-ph", p
@@ -186,20 +212,26 @@ def test_fetch_download_and_cache_mocked() -> bool:
     print(">> Testing PDF download + cache identity (mocked network)...\n")
     fake_pdf = b"%PDF-1.4\n" + b"x" * 512
     with mock.patch.object(
-        arxiv_interface.requests.Session, "get",
-        return_value=_FakeStreamResponse(fake_pdf),
+        arxiv_interface.requests.Session, "get", _router(fake_pdf, "v3"),
     ):
         r1 = json.loads(
             ArxivPDFTool(arxiv_id="2103.02708", base_directory=str(TEST_DIR))._run()
         )
         assert r1["status"] == "ok" and r1["cached"] is False, r1
         assert (TEST_DIR / r1["pdf_path"]).exists()
+        # "latest" pinned to the version arXiv reports, and cached under it.
+        assert r1["arxiv_id"] == "2103.02708v3" and r1["source_id"] == "arXiv:2103.02708v3", r1
+        assert r1["pdf_path"] == "papers/2103.02708v3/2103.02708v3.pdf", r1
+        assert r1["provenance"]["files"][0]["sha256"] == r1["sha256"], r1
 
         # Same id again -> cache hit, same hash.
         r1b = json.loads(
             ArxivPDFTool(arxiv_id="2103.02708", base_directory=str(TEST_DIR))._run()
         )
         assert r1b["cached"] is True and r1b["sha256"] == r1["sha256"], r1b
+        assert r1b["retrieved_at"] == r1["retrieved_at"], r1b
+        assert r1b["provenance"]["from_cache"] is True, r1b
+        assert r1b["provenance"]["cached_at"] == r1["retrieved_at"], r1b
 
         # Different id -> different file (no cache collision).
         r2 = json.loads(
@@ -209,8 +241,7 @@ def test_fetch_download_and_cache_mocked() -> bool:
 
     # Non-PDF payload must be rejected.
     with mock.patch.object(
-        arxiv_interface.requests.Session, "get",
-        return_value=_FakeStreamResponse(b"<html>not a pdf</html>"),
+        arxiv_interface.requests.Session, "get", _router(b"<html>not a pdf</html>"),
     ):
         r3 = ArxivPDFTool(arxiv_id="2000.00001", base_directory=str(TEST_DIR))._run()
         assert "error" in r3.lower() or "not a valid pdf" in r3.lower(), r3
@@ -222,8 +253,7 @@ def test_fetch_both_args_precedence() -> bool:
     print(">> Testing fetch arxiv_id precedence over pdf_url...\n")
     fake_pdf = b"%PDF-1.4\n" + b"y" * 128
     with mock.patch.object(
-        arxiv_interface.requests.Session, "get",
-        return_value=_FakeStreamResponse(fake_pdf),
+        arxiv_interface.requests.Session, "get", _router(fake_pdf),
     ):
         r = json.loads(
             ArxivPDFTool(
@@ -244,20 +274,19 @@ def test_cache_symlink_not_followed() -> bool:
     print(">> Testing cache does not follow a leaf symlink...\n")
     base = TEST_DIR / "cachebox"
     # One directory per paper: <base>/papers/<id>/<id>.pdf
-    pdf_dir = base / "papers" / "2103.02708"
+    pdf_dir = base / "papers" / "2103.02708v1"
     pdf_dir.mkdir(parents=True, exist_ok=True)
     # A malicious symlink at the cache path pointing outside the sandbox.
     outside_pdf = TEST_DIR / "secret.pdf"
     outside_pdf.write_bytes(b"%PDF-1.4\nSECRET")
-    dest = pdf_dir / "2103.02708.pdf"
+    dest = pdf_dir / "2103.02708v1.pdf"
     if dest.exists() or dest.is_symlink():
         dest.unlink()
     os.symlink(outside_pdf, dest)
 
     fake_pdf = b"%PDF-1.4\nLEGIT-DOWNLOAD"
     with mock.patch.object(
-        arxiv_interface.requests.Session, "get",
-        return_value=_FakeStreamResponse(fake_pdf),
+        arxiv_interface.requests.Session, "get", _router(fake_pdf),
     ):
         r = json.loads(
             ArxivPDFTool(arxiv_id="2103.02708", base_directory=str(base))._run()
@@ -265,7 +294,7 @@ def test_cache_symlink_not_followed() -> bool:
     assert r["status"] == "ok", r
     assert r["cached"] is False, r  # symlink not served as cache
     # The symlink was atomically replaced by the real download, not followed.
-    assert not (pdf_dir / "2103.02708.pdf").is_symlink(), "symlink should be replaced"
+    assert not (pdf_dir / "2103.02708v1.pdf").is_symlink(), "symlink should be replaced"
     assert outside_pdf.read_bytes() == b"%PDF-1.4\nSECRET", "outside file must be untouched"
     print("[✓] Cache symlink-safety test passed\n")
     return True
@@ -391,8 +420,7 @@ def test_arxiv_source_tool_mocked() -> bool:
         }
     )
     with mock.patch.object(
-        arxiv_interface.requests.Session, "get",
-        return_value=_FakeStreamResponse(_gz(tar)),
+        arxiv_interface.requests.Session, "get", _router(_gz(tar), "v2"),
     ):
         r = json.loads(
             ArxivSourceTool(arxiv_id="2103.02708", base_directory=str(TEST_DIR))._run()
@@ -401,17 +429,30 @@ def test_arxiv_source_tool_mocked() -> bool:
     assert r["n_files"] == 2, r
     text = (TEST_DIR / r["tex_path"]).read_text()
     assert "L = y S1 u e" in text and "% comment" not in text, text[:200]
+    # Versioned identity, e-print hash kept, originals kept verbatim.
+    import hashlib
+    assert r["source_id"] == "arXiv:2103.02708v2" and r["tex_path"].startswith("papers/2103.02708v2/"), r
+    assert r["sha256"] == hashlib.sha256(_gz(tar)).hexdigest(), r
+    assert (TEST_DIR / r["eprint_path"]).read_bytes() == _gz(tar), r
+    assert "% comment" in (TEST_DIR / r["main_tex"]).read_text(), r
+    assert r["provenance"]["source_ids"] == ["arXiv:2103.02708v2"], r
 
-    # Cache hit on second call (no network needed).
-    r2 = json.loads(
-        ArxivSourceTool(arxiv_id="2103.02708", base_directory=str(TEST_DIR))._run()
-    )
-    assert r2["cached"] is True, r2
+    # Cache hit on second call: explicit version needs no network, and the
+    # e-print hash comes back recomputed from the kept payload.
+    with mock.patch.object(
+        arxiv_interface.requests.Session, "get", side_effect=AssertionError("network used"),
+    ):
+        r2 = json.loads(
+            ArxivSourceTool(arxiv_id="2103.02708v2", base_directory=str(TEST_DIR))._run()
+        )
+    assert r2["cached"] is True and r2["sha256"] == r["sha256"], r2
+    assert r2["tex_sha256"] == r["tex_sha256"] and r2["main_tex"] == r["main_tex"], r2
+    assert r2["provenance"]["from_cache"] is True, r2
+    assert r2["provenance"]["cached_at"] == r["retrieved_at"], r2
 
     # pdf_only payload.
     with mock.patch.object(
-        arxiv_interface.requests.Session, "get",
-        return_value=_FakeStreamResponse(b"%PDF-1.4 binary"),
+        arxiv_interface.requests.Session, "get", _router(b"%PDF-1.4 binary"),
     ):
         r3 = json.loads(
             ArxivSourceTool(arxiv_id="1811.07920", base_directory=str(TEST_DIR))._run()
@@ -420,7 +461,7 @@ def test_arxiv_source_tool_mocked() -> bool:
     # The e-print WAS the PDF, so it is saved rather than re-fetched: the
     # bytes are already in hand and arXiv is rate-limited to one request/3s.
     assert "pdf_path" in r3, r3
-    assert r3["pdf_path"] == "papers/1811.07920/1811.07920.pdf", r3
+    assert r3["pdf_path"] == "papers/1811.07920v1/1811.07920v1.pdf", r3
     saved = TEST_DIR / r3["pdf_path"]
     assert saved.is_file() and saved.read_bytes() == b"%PDF-1.4 binary", r3
     assert r3["bytes"] == len(b"%PDF-1.4 binary"), r3
@@ -428,16 +469,14 @@ def test_arxiv_source_tool_mocked() -> bool:
 
     # Malicious archive rejected via the tool path.
     with mock.patch.object(
-        arxiv_interface.requests.Session, "get",
-        return_value=_FakeStreamResponse(_gz(_make_tar({"../evil.tex": b"x"}))),
+        arxiv_interface.requests.Session, "get", _router(_gz(_make_tar({"../evil.tex": b"x"}))),
     ):
         r4 = ArxivSourceTool(arxiv_id="2000.00001", base_directory=str(TEST_DIR))._run()
     assert "unsafe" in r4.lower() or "error" in r4.lower(), r4
 
     # Single gzipped .tex payload.
     with mock.patch.object(
-        arxiv_interface.requests.Session, "get",
-        return_value=_FakeStreamResponse(_gz(b"\\documentclass{a}\nBody % c")),
+        arxiv_interface.requests.Session, "get", _router(_gz(b"\\documentclass{a}\nBody % c")),
     ):
         r5 = json.loads(
             ArxivSourceTool(arxiv_id="2005.06475", base_directory=str(TEST_DIR))._run()
@@ -479,6 +518,20 @@ def test_path_traversal() -> bool:
     assert "error" in result.lower() or "denied" in result.lower(), result
     print("[\u2713] Path-traversal test passed\n")
     return True
+
+
+try:
+    import pytest
+
+    @pytest.fixture(autouse=True, scope="module")
+    def _fresh_test_dir():
+        """Under pytest, start from and leave behind an empty TEST_DIR, so a
+        rerun does not hit the previous run's cache."""
+        shutil.rmtree(TEST_DIR, ignore_errors=True)
+        yield
+        shutil.rmtree(TEST_DIR, ignore_errors=True)
+except ImportError:  # run as a script
+    pass
 
 
 def cleanup_test_files() -> None:

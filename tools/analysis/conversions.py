@@ -40,6 +40,7 @@ class EventJSONLToNumpyTool(BaseTool):
     # --------------------------- Runtime fields --------------------------- #
     jsonl_path: str = RuntimeField(description="Relative path to events.jsonl file")
     output_path: str = RuntimeField(description="Relative path to save .npy file (e.g. 'data/run/events.npy')")
+    max_particles: int = RuntimeField(default=0, description="Optional cap on particles/event in the padded array (0 = use the observed maximum). Set a cap (e.g. 500) for large hadron-level showers to bound the dense array size; keeps the leading particles by input order.")
     # ---------------------------------------------------------------------- #
 
     # ---------------------------- State fields ---------------------------- #
@@ -82,43 +83,59 @@ class EventJSONLToNumpyTool(BaseTool):
                 suggestion="Provide a valid events.jsonl path"
             )
         
-        # Read events from JSONL.
+        # STREAMING two-pass conversion. Loading the whole JSONL into a list of
+        # dicts (`[json.loads(line) for line in f]`) plus a list-of-lists plus the
+        # dense array held ~3x the dataset in RAM and OOM-killed trials on a 50k
+        # shower (~3.5 GB on disk -> >10 GB resident). Instead: pass 1 streams to
+        # find n_events and max multiplicity; pass 2 pre-allocates a single zeroed
+        # array and fills it row-by-row while streaming. Only the output array is
+        # ever resident. An optional `max_particles` cap bounds even that (keeps
+        # the leading-by-input-order particles; raise it if you need more).
         try:
+            cap = int(self.max_particles) if int(self.max_particles or 0) > 0 else None
+        except (TypeError, ValueError):
+            cap = None
+
+        try:
+            n_events = 0
+            max_len = 0
             with open(src, "r") as f:
-                events = [json.loads(line) for line in f]
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = (json.loads(line).get("data", {}) or {}).get("particles") or []
+                    n = len(parts) if cap is None else min(len(parts), cap)
+                    if n > max_len:
+                        max_len = n
+                    n_events += 1
         except Exception as e:
+            return self.format_error(error="Read Error", reason=str(e),
+                                     context=f"path={src}", suggestion="Verify JSONL integrity")
+
+        if n_events == 0 or max_len == 0:
             return self.format_error(
-                error="Read Error",
-                reason=str(e),
-                context=f"path={src}",
-                suggestion="Verify JSONL integrity"
-            )
+                error="Empty Dataset",
+                reason="All events have zero particles",
+                context=f"Processed {n_events} events, all with empty particle lists",
+                suggestion="Check that the input JSONL contains events with particles")
 
-        # Process and convert events to padded NumPy array.
         try:
-            # Build event list.
-            padded_events = []
-            for ev in tqdm(events, desc="Processing events", unit="evt", **TQDM_CONFIG):
-                particles = ev["data"]["particles"]
-                rows = [[p["px"], p["py"], p["pz"], p["E"], p["id"]] for p in particles]
-                padded_events.append(rows)
-
-            # Calculate max length for padding.
-            max_len = max(len(ev) for ev in padded_events) if padded_events else 0
-
-            # Handle edge case: all events are empty
-            if max_len == 0:
-                return self.format_error(
-                    error="Empty Dataset",
-                    reason="All events have zero particles",
-                    context=f"Processed {len(events)} events, all with empty particle lists",
-                    suggestion="Check that the input JSONL file contains events with particles"
-                )
-
-            # Create final padded array.
-            final_array = np.array([
-                np.array(ev + [[0]*5]*(max_len - len(ev))) for ev in padded_events
-            ])
+            final_array = np.zeros((n_events, max_len, 5), dtype=np.float64)
+            with open(src, "r") as f:
+                i = 0
+                for line in tqdm(f, total=n_events, desc="Processing events", unit="evt", **TQDM_CONFIG):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    particles = (json.loads(line).get("data", {}) or {}).get("particles") or []
+                    if cap is not None:
+                        particles = particles[:cap]
+                    for j, p in enumerate(particles):
+                        final_array[i, j, 0] = p["px"]; final_array[i, j, 1] = p["py"]
+                        final_array[i, j, 2] = p["pz"]; final_array[i, j, 3] = p["E"]
+                        final_array[i, j, 4] = p["id"]
+                    i += 1
 
             # Save to .npy file.
             # Strip .npy extension if present, as np.save() adds it automatically
@@ -128,7 +145,7 @@ class EventJSONLToNumpyTool(BaseTool):
 
             result = {
                 "status": "ok",
-                "input_events": len(events),
+                "input_events": n_events,
                 "max_particles": int(max_len),
                 "output_shape": list(final_array.shape),
                 "saved_path": os.path.relpath(dst, self.base_directory),

@@ -10,6 +10,8 @@ Converts between natural units (ℏ=c=1) and SI (MKSA) units.
 Based on the standard conversion table where energy (eV) is the base unit.
 """
 
+from typing import Optional
+
 from orchestral.tools.base.tool import BaseTool
 from orchestral.tools.base.field_utils import RuntimeField, StateField
 import re
@@ -39,7 +41,7 @@ class NaturalUnitsConverter(BaseTool):
     """
 
     # Runtime field: the conversion request string
-    conversion_request: str = RuntimeField(
+    conversion_request: Optional[str] = RuntimeField(
         default=None,
         description=(
             "Conversion request in format '<value> <unit> to <target_unit>'. "

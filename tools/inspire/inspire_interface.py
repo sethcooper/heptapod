@@ -83,6 +83,12 @@ class RateLimiter:
         return 0.0
 
 
+def _response_url(response: Any, fallback: str) -> str:
+    """The URL the response came from (after redirects), else ``fallback``."""
+    url = getattr(response, "url", None)
+    return url if isinstance(url, str) and url else fallback
+
+
 class InspireInterface:
     """
     Interface to INSPIRE HEP API with rate limiting and caching.
@@ -119,6 +125,14 @@ class InspireInterface:
             "Accept": "application/json",
             "User-Agent": "HEPTAPOD/1.0 (Physics research tool)"
         })
+        # One entry per API request since the last reset, for provenance:
+        # {"url", "from_cache", "cached_at" (epoch), "data"}.
+        self.call_log: List[Dict[str, Any]] = []
+
+    @staticmethod
+    def full_url(url: str, params: Optional[Dict[str, Any]] = None) -> str:
+        """The exact URL requests will send for ``url`` + ``params``."""
+        return requests.Request("GET", url, params=params).prepare().url
 
     def _request(
         self,
@@ -143,11 +157,17 @@ class InspireInterface:
         url = f"{BASE_URL}{endpoint}"
         cache_key = f"{endpoint}:{sorted(params.items()) if params else ''}"
 
+        request_url = self.full_url(url, params)
+
         # Check cache
         if use_cache and self._cache:
-            cached = self._cache.get(cache_key)
-            if cached is not None:
-                return cached
+            entry = self._cache.get_entry(cache_key)
+            if entry is not None:
+                self.call_log.append({
+                    "url": request_url, "from_cache": True,
+                    "cached_at": entry["timestamp"], "data": entry["data"],
+                })
+                return entry["data"]
 
         # Rate limit
         self.rate_limiter.wait_if_needed()
@@ -169,6 +189,10 @@ class InspireInterface:
         if use_cache and self._cache:
             self._cache.set(cache_key, data)
 
+        self.call_log.append({
+            "url": _response_url(response, request_url),
+            "from_cache": False, "cached_at": None, "data": data,
+        })
         return data
 
     # ==================== Literature Methods ==================== #
@@ -280,6 +304,10 @@ class InspireInterface:
         self.rate_limiter.wait_if_needed()
         response = self._session.get(url, params=params, timeout=30)
         response.raise_for_status()
+        self.call_log.append({
+            "url": _response_url(response, self.full_url(url, params)),
+            "from_cache": False, "cached_at": None, "data": response.text,
+        })
         return response.text
 
     # ==================== Author Methods ==================== #

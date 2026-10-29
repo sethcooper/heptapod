@@ -113,11 +113,13 @@ M$ClassesDescription = {
 (* Use distinct Lorentz indices (lor1, lor2) to avoid clashes with the  *)
 (* muon symbol mu in SM Lagrangian terms.                               *)
 
-LAprimeKin := -(1/4) FS[Aprime, lor1, lor2] FS[Aprime, lor1, lor2]
-              + (1/2) MAprime^2 Aprime[lor1] Aprime[lor1];
+(* A continued line ends with its operator: a line starting with + or -
+   would begin a new statement, and the mass term would be lost.          *)
+LAprimeKin := -(1/4) FS[Aprime, lor1, lor2] FS[Aprime, lor1, lor2] +
+              (1/2) MAprime^2 Aprime[lor1] Aprime[lor1];
 
-LphidKin   := (1/2) del[phid, lor1] del[phid, lor1]
-              - (1/2) Mphid^2 phid^2;
+LphidKin   := (1/2) del[phid, lor1] del[phid, lor1] -
+              (1/2) Mphid^2 phid^2;
 
 (* phi -> A' A' interaction *)
 LphiAA     := gphiAA phid Aprime[lor1] Aprime[lor1];

@@ -43,13 +43,16 @@ PATH_KEYS: Dict[str, str] = {
     "mg5_path": "MG5_PATH",
     "delphes_path": "DELPHES_PATH",
     "pythia_path": "PYTHIA_PATH",
+    "sherpa_path": "SHERPA_PATH",
+    "rivet_path": "RIVET_PATH",
 }
 
 #: What `config.example.py` ships. A value still equal to one of these means
 #: the field was never filled in, not that the path is genuinely "/path/to".
 _PLACEHOLDERS = {
     "/path/to/FeynRules", "/path/to/wolframscript", "/path/to/MG5_aMC",
-    "/path/to/Delphes", "/path/to/pythia", "", None,
+    "/path/to/Delphes", "/path/to/pythia", "/path/to/Sherpa", "/path/to/rivet",
+    "", None,
 }
 
 
