@@ -777,3 +777,7 @@ tools:
     name: CernDocsFetchTool
     description: Fetch full pages from CERN MkDocs documentation sites.
     bundle: cernMkdocs
+  - module: tools.cernMkdocs.search_tool
+    name: CernDocsSearchTool
+    description: Search in pages from CERN MkDocs documentation sites.
+    bundle: cernMkdocs

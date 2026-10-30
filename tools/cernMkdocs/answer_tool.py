@@ -44,22 +44,15 @@ class CernDocsAnswerTool(BaseTool):
                     "message": "No relevant documentation search results were found.",
                     "query": self.query,
                 }
-
-            # The search results are dictionaries with url and score fields.
-            best = max(
-                results,
-                key=lambda result: float(result.get("score", 0)),
-            )
+            best = max(results, key=lambda r: float(r.get("score", 0)))
             url = best.get("url")
-
+            
             if not url:
                 return {
                     "status": "error",
-                    "message": "The best search result did not contain a page URL.",
-                    "result": best,
+                    "message": "Search result has no URL.",
                 }
-
-            # Fetch the exact URL returned by search; don't construct a URL.
+            
             fetched = service.fetch(
                 url=url,
                 source_id=self.source_id,
@@ -73,16 +66,16 @@ class CernDocsAnswerTool(BaseTool):
             )
             markdown = str(markdown)
             
-            # # Keep the first diagnostic response deliberately small.
-            # max_chars = 4000
-            # was_truncated = len(markdown) > max_chars
+            # Keep the first diagnostic response deliberately small.
+            max_chars = 5000
+            was_truncated = len(markdown) > max_chars
             
             return {
                 "status": "ok",
                 "title": best.get("title", ""),
                 "url": url,
-                "content": markdown  #[:max_chars],
-                # "content_note": "except from the page. Use the URL to get the full content.",
+                "content": markdown[:max_chars],
+                "content_note": "excerpt from the page. Use the URL to get the full content.",
             }
 
         except Exception as exc:
