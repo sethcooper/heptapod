@@ -9,7 +9,7 @@ class CernDocsFetchTool(BaseTool):
     """
     Fetch Markdown content from a configured CERN MkDocs documentation source.
        Use this tool when the user asks to read, inspect, or retrieve documentation content.
-       The source ID defaults to cern-mkdocs. For a specific page, pass its URL.
+       The source ID defaults to blah, an invalid value. This must be set to a valid source value first. For a specific page, pass its URL.
        For general documentation or a homepage request, leave page empty to fetch docs/index.md. Do not use the source ID as the page path.
     """
 
