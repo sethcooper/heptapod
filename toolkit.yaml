@@ -208,17 +208,7 @@ bundles:
   events:
     deps: [awkward>=2.8.0, uproot>=5.7.0, pyhepmc>=2.13]
 
-<<<<<<< Updated upstream
   # ── Delphes fast detector simulation (a local build with ROOT) ──
-=======
-  # ── Search CERN MkDocs sites and associated GitLab repos ─────────
-  cernMkdocs:
-    deps: [cern-mkdocs-mcp @ git+https://github.com/Soap2G/cern-mkdocs-mcp.git@0fc4e4e861081442a6b68eb60a40b8cea0d4bfa0]
-
-  # ── Delphes fast detector simulation ─────────────────────────────
-  # Gated on a local Delphes build (needs ROOT). The ROOT-output
-  # flattener reads with uproot, so no PyROOT is required.
->>>>>>> Stashed changes
   delphes:
     requires: [delphes_path]
     deps: [uproot>=5.0]
@@ -227,6 +217,11 @@ bundles:
   rivet:
     requires: [rivet_path]
     deps: [pyyaml>=6.0, pyhepmc>=2.13, matplotlib>=3.8, numpy>=2.3.5]
+
+  # ── Search CERN MkDocs sites and associated GitLab repos ─────────
+  cernMkdocs:
+    deps: [cern-mkdocs-mcp @ git+https://github.com/Soap2G/cern-mkdocs-mcp.git@0fc4e4e861081442a6b68eb60a40b8cea0d4bfa0]
+
 tools:
   - module: tools.analysis.conversions
     name: EventJSONLToNumpyTool
