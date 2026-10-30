@@ -208,7 +208,17 @@ bundles:
   events:
     deps: [awkward>=2.8.0, uproot>=5.7.0, pyhepmc>=2.13]
 
+<<<<<<< Updated upstream
   # ── Delphes fast detector simulation (a local build with ROOT) ──
+=======
+  # ── Search CERN MkDocs sites and associated GitLab repos ─────────
+  cernMkdocs:
+    deps: [cern-mkdocs-mcp @ git+https://github.com/Soap2G/cern-mkdocs-mcp.git@0fc4e4e861081442a6b68eb60a40b8cea0d4bfa0]
+
+  # ── Delphes fast detector simulation ─────────────────────────────
+  # Gated on a local Delphes build (needs ROOT). The ROOT-output
+  # flattener reads with uproot, so no PyROOT is required.
+>>>>>>> Stashed changes
   delphes:
     requires: [delphes_path]
     deps: [uproot>=5.0]
@@ -764,3 +774,11 @@ tools:
     description: Merge the YODA outputs of independent Rivet runs (different
       seeds or processes) with rivet-merge.
     bundle: rivet
+  - module: tools.cernMkdocs.answer_tool
+    name: CernDocsAnswerTool
+    description: Answer questions using content from CERN MkDocs documentation sites.
+    bundle: cernMkdocs
+  - module: tools.cernMkdocs.fetch_tool
+    name: CernDocsFetchTool
+    description: Fetch full pages from CERN MkDocs documentation sites.
+    bundle: cernMkdocs
